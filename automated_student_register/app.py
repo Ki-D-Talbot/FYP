@@ -121,8 +121,10 @@ def video_feed():
         while True:
             success, frame = camera.read()  # Read a frame from the webcam
             if not success:
+                print("Failed to capture frame")
                 break
             else:
+                print("Frame captured successfully")
                 gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)  # Convert to grayscale
                 faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5)
 
