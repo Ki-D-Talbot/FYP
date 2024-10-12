@@ -1,0 +1,10 @@
+<!-- automated_student_register/templates/video.html -->
+{% extends "base.html" %}
+
+{% block title %}Video Feed{% endblock %}
+
+{% block content %}
+<h1 class="mt-5">Live Video Feed</h1>
+<img src="{{ url_for('video_feed') }}" style="width: 100%; height: auto;">
+{% endblock %}
+
