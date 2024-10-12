@@ -5,6 +5,7 @@ from datetime import datetime
 from picamera2 import Picamera2 # Adjust this import based on your library
 import face_recognition  # Make sure to install face_recognition library
 from automated_student_register.app import db, Student, Attendance   # Adjust the import based on your Flask app structure
+import time
 
 # Initialize the camera
 camera = Picamera2()
@@ -41,13 +42,19 @@ def get_student_id_by_name(student_name):
 
 # Start capturing video
 camera.start_preview()
+time.sleep(2)  # Allow time for the camera to initialize
 video_capture = cv2.VideoCapture(0)  # Use 0 for the Pi camera
+
+if not video_capture.isOpened():
+    print("Failed to open video capture.")
+    exit()  # Exit if the camera cannot be opened
 
 while True:
     # Capture frame-by-frame
     ret, frame = video_capture.read()
     if not ret:
-        break
+        print("Failed to capture frame.")
+        break  # Exit the loop if frame capture fails
 
     # Convert the image from BGR to RGB
     rgb_frame = frame[:, :, ::-1]
