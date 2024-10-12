@@ -2,12 +2,12 @@ import cv2
 import os
 import numpy as np
 from datetime import datetime
-from rpicam import PiCamera  # Adjust this import based on your library
+from picamera2 import Picamera2 # Adjust this import based on your library
 import face_recognition  # Make sure to install face_recognition library
 from automated_student_register.app import db, Student, Attendance   # Adjust the import based on your Flask app structure
 
 # Initialize the camera
-camera = PiCamera()
+camera = Picamera2()
 
 # Load known faces
 known_face_encodings = []
