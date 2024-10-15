@@ -69,3 +69,24 @@ The Automated Student Register System is an innovative solution designed to stre
 ## 8. Conclusion
 The Automated Student Register System represents a significant step forward in modernizing attendance tracking and resource management in educational settings. By combining cutting-edge technologies with practical applications, this project aims to enhance operational efficiency, provide valuable insights, and create a more responsive and energy-efficient learning environment.
 
+## 9. References
+
+Belmonte, R. & Allaert, B. 2022, Face analysis under uncontrolled conditions : from face detection to expression recognition, John Wiley & Sons, Inc, Hoboken, NJ.
+
+Ciftci, O., Choi, E.(. & Berezina, K. 2021, "Let’s face it: Are customers ready for facial recognition technology at quick-service restaurants?", International journal of hospitality management, vol. 95, pp. 102941.
+
+Fussey, P., Davies, B. & Innes, M. 2021a, "‘Assisted’ facial recognition and the reinvention of suspicion and discretion in digital policing", British Journal of Criminology, vol. 61, no. 2, pp. 325–344.
+
+Fussey, P., Davies, B. & Innes, M. 2021b, "‘Assisted’ facial recognition and the reinvention of suspicion and discretion in digital policing", British Journal of Criminology, vol. 61, no. 2, pp. 325–344.
+
+Glicksman, J.T., Reger, C., Parasher, A.K. & Kennedy, D.W. 2017, "Accuracy of computer‐assisted navigation: significant augmentation by facial recognition software", International forum of allergy & rhinology, vol. 7, no. 9, pp. 884–888.
+
+Katsanis, S.H., Claes, P., Doerr, M., Cook-Deegan, R., Tenenbaum, J.D., Evans, B.J., Lee, M.K., Anderton, J., Weinberg, S.M. & Wagner, J.K. 2021, "A survey of U.S. public perspectives on facial recognition technology and facial imaging data practices in health and research contexts", PloS one, vol. 16, no. 10, pp. e0257923.
+
+Lai, X. & Patrick Rau, P. 2021, "Has facial recognition technology been misused? A public perception model of facial recognition scenarios", Computers in Human Behavior, vol. 124, pp. 106894.
+
+Lee, C.T. & Pan, L. 2023, "Resistance of facial recognition payment service: a mixed method approach", The Journal of services marketing, vol. 37, no. 3, pp. 392–407.
+
+Prosise, J. 2023, Applied machine learning and AI for engineers : solve business problems that can't be solved algorithmically, O'Reilly, Cambridge.
+
+Saadi, I., cunningham, D.W., Taleb-Ahmed, A., Hadid, A. & Hillali, Y.E. 2024, "Driver’s facial expression recognition: A comprehensive survey", Expert Systems with Applications, vol. 242, pp. 122784.
