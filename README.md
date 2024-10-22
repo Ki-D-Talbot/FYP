@@ -27,12 +27,13 @@ An introduction to the methodology, its purpose, and use in managing the project
 
 ```mermaid
 graph TD
-    A[Students] -->|Submit Attendance|
+    A[Students] -->|Submit Attendance| B[Automated Student Register System]
     A -->|Request Attendance Report| B
     C[Administrators] -->|Manage Students| B
     C -->|View Reports| B
     B -->|Attendance Data| E[Database]
     B -->|Generate Reports| C
+
 ```
 
 
