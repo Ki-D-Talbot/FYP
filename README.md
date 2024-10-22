@@ -27,11 +27,10 @@ An introduction to the methodology, its purpose, and use in managing the project
 
 ```mermaid
 graph TD
-    A[Students] -->|Submit Attendance| B[Automated Student Register System]
+    A[Students] -->|Submit Attendance|
     A -->|Request Attendance Report| B
     C[Administrators] -->|Manage Students| B
     C -->|View Reports| B
-    D[IoT Devices] -->|Control Environment| B
     B -->|Attendance Data| E[Database]
     B -->|Generate Reports| C
 ```
@@ -40,15 +39,12 @@ graph TD
 
 ```mermaid
 graph TD
-    A[Students] -->|Detect Face| B[Facial Recognition Module]
+    A[Students Detected] -->|Detect Face| B[Facial Recognition Module]
     B -->|Log Attendance| C[Attendance Management]
     C -->|Store Data| D[Database]
     
     E[Administrators] -->|Manage Profiles| F[Profile Management]
     F -->|Update Data| D
-
-    G[IoT Devices] -->|Send Data| H[IoT Integration]
-    H -->|Adjust Environment| D
 
     C -->|Generate Reports| I[Data Analytics Module]
     I -->|Visualize Data| E
