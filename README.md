@@ -53,13 +53,13 @@ graph TD
     C -->|Generate Reports| I[Data Analytics Module]
     I -->|Visualize Data| E
 ```
-
+## State Diagram
 ```mermaid
 stateDiagram-v2
-    [*] --> VideoStreaming
     VideoStreaming --> FaceDetected : Student arrives
     FaceDetected --> AttendanceLogged : Face recognized
-    AttendanceLogged --> Idle : Attendance recorded
+    AttendanceLogged --> VideoStreaming
+    FaceFlagged --> VideoStreaming
     FaceDetected --> FaceFlagged : Face not recognized
 ```
 
