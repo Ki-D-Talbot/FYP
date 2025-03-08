@@ -167,87 +167,68 @@ def save_face():
 
 @app.route('/video_feed')
 def video_feed():
-    face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
-    camera = cv2.VideoCapture(0)
-    
-    # Load student face embeddings
-    student_embeddings = {}
-    if facial_recognition_model is not None:
-        students = Student.query.all()
-        for student in students:
-            if student.photo_path and os.path.exists(student.photo_path):
-                try:
-                    img = cv2.imread(student.photo_path)
-                    img = cv2.resize(img, (224, 224))  # Adjust based on your model
-                    img = img.astype('float32') / 255.0
-                    img = np.expand_dims(img, axis=0)
-                    
-                    embedding = facial_recognition_model.predict(img, verbose=0)
-                    student_embeddings[student.student_id] = embedding
-                    print(f"Loaded embedding for student: {student.name}")
-                except Exception as e:
-                    print(f"Error processing face for {student.name}: {e}")
-    
     def generate_frames():
-        frame_count = 0
-        
-        while True:
-            success, frame = camera.read()
-            if not success:
-                print("Failed to capture frame")
-                break
-            
-            frame_count += 1
-            # Process every 3rd frame to reduce load
-            process_recognition = (frame_count % 3 == 0) and facial_recognition_model is not None
-            
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5)
-            
-            for (x, y, w, h) in faces:
-                cv2.rectangle(frame, (x, y), (x + w, y + h), (255, 0, 0), 2)
+        try:
+            # Try first with PiCamera2
+            try:
+                from picamera2 import Picamera2
+                print("Using PiCamera2")
                 
-                if process_recognition and student_embeddings:
-                    try:
-                        face = frame[y:y+h, x:x+w]
-                        face = cv2.resize(face, (224, 224))  # Adjust based on your model
-                        face = face.astype('float32') / 255.0
-                        face = np.expand_dims(face, axis=0)
-                        
-                        embedding = facial_recognition_model.predict(face, verbose=0)
-                        
-                        max_similarity = 0
-                        recognized_student_id = None
-                        recognized_name = "Unknown"
-                        
-                        for student_id, ref_embedding in student_embeddings.items():
-                            similarity = cosine_similarity(embedding, ref_embedding)[0][0]
-                            
-                            if similarity > max_similarity and similarity > 0.7:  # Threshold
-                                max_similarity = similarity
-                                recognized_student_id = student_id
-                                student = Student.query.get(student_id)
-                                recognized_name = student.name if student else "Unknown"
-                        
-                        # Display name and confidence
-                        label = f"{recognized_name} ({max_similarity:.2f})"
-                        cv2.putText(frame, label, (x, y-10), 
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
-                        
-                        # Log attendance if recognized
-                        if recognized_student_id is not None and max_similarity > 0.7:
-                            log_attendance(recognized_student_id)
+                picam2 = Picamera2()
+                config = picam2.create_preview_configuration()
+                picam2.configure(config)
+                picam2.start()
+                
+                while True:
+                    # Capture frame
+                    frame = picam2.capture_array()
+                    print("Captured frame with PiCamera2")
                     
-                    except Exception as e:
-                        print(f"Error processing face: {e}")
-                else:
-                    # If not using recognition model, use simple detection
-                    log_attendance(1)  # Default to student_id 1
+                    # Convert to BGR for OpenCV processing
+                    if frame.shape[2] == 3:  # If it's an RGB image
+                        frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                    
+                    # Convert frame to JPEG
+                    ret, buffer = cv2.imencode('.jpg', frame)
+                    frame_bytes = buffer.tobytes()
+                    
+                    # Yield the frame
+                    yield (b'--frame\r\n'
+                           b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
             
-            ret, buffer = cv2.imencode('.jpg', frame)
-            frame = buffer.tobytes()
+            except (ImportError, ModuleNotFoundError):
+                # Fall back to OpenCV if PiCamera2 isn't available
+                print("PiCamera2 not available, falling back to OpenCV")
+                camera = cv2.VideoCapture(0)
+                
+                if not camera.isOpened():
+                    print("Failed to open camera with OpenCV")
+                    yield (b'--frame\r\n'
+                           b'Content-Type: image/jpeg\r\n\r\n' + b'' + b'\r\n')
+                    return
+                
+                while True:
+                    success, frame = camera.read()
+                    if not success:
+                        print("Failed to capture frame with OpenCV")
+                        break
+                    
+                    print("Captured frame with OpenCV")
+                    
+                    # Convert frame to JPEG
+                    ret, buffer = cv2.imencode('.jpg', frame)
+                    frame_bytes = buffer.tobytes()
+                    
+                    # Yield the frame
+                    yield (b'--frame\r\n'
+                           b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+                
+                camera.release()
+        
+        except Exception as e:
+            print(f"Error in generate_frames: {e}")
             yield (b'--frame\r\n'
-                   b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+                   b'Content-Type: image/jpeg\r\n\r\n' + b'' + b'\r\n')
     
     return Response(generate_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
@@ -269,6 +250,28 @@ def log_attendance(student_id):
 @login_required
 def video():
     return render_template('video.html')
+
+@app.route('/check_attendance')
+@login_required
+def check_attendance():
+    # Get the most recent 10 attendance records
+    recent_attendance = db.session.query(
+        Attendance, Student.name
+    ).join(
+        Student, Attendance.student_id == Student.student_id
+    ).order_by(
+        Attendance.timestamp.desc()
+    ).limit(10).all()
+    
+    attendance_data = []
+    for attendance, name in recent_attendance:
+        attendance_data.append({
+            'id': attendance.attendance_id,
+            'student_name': name,
+            'timestamp': attendance.timestamp.strftime('%Y-%m-%d %H:%M:%S')
+        })
+    
+    return render_template('check_attendance.html', attendance_data=attendance_data)
 
 if __name__ == '__main__':
     app.run(debug=True)

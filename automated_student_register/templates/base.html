@@ -1,6 +1,7 @@
 <!-- automated_student_register/templates/base.html -->
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -10,17 +11,20 @@
         body {
             display: flex;
         }
+
         .sidebar {
             min-height: 100vh;
             background-color: #f8f9fa;
             padding: 15px;
         }
+
         .content {
             flex: 1;
             padding: 15px;
         }
     </style>
 </head>
+
 <body>
     <div class="sidebar">
         <h4>Navigation</h4>
@@ -37,16 +41,21 @@
             <li class="nav-item">
                 <a class="nav-link" href="/video">Live Video Feed</a>
             </li>
+            <li class="nav-item">
+                <a class="nav-link" href="/check_attendance">Check Attendance</a>
+            </li>
+
         </ul>
     </div>
     <div class="content">
         <div class="d-flex justify-content-between align-items-center">
             <h1>Automated Student Register System</h1>
-            <span>Welcome, {{ current_user.username }}</span>  <!-- Display admin's name -->
+            <span>Welcome, {{ current_user.username }}</span> <!-- Display admin's name -->
         </div>
         <main>
             {% block content %}{% endblock %}
         </main>
     </div>
 </body>
+
 </html>

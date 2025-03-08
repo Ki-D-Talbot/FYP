@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Recent Attendance{% endblock %}
+{% block content %}
+<h1 class="mt-5">Recent Attendance Records</h1>
+
+<div class="alert alert-info">
+    Showing the 10 most recent attendance records.
+</div>
+
+<table class="table mt-3">
+    <thead>
+        <tr>
+            <th>ID</th>
+            <th>Student Name</th>
+            <th>Timestamp</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for record in attendance_data %}
+        <tr>
+            <td>{{ record.id }}</td>
+            <td>{{ record.student_name }}</td>
+            <td>{{ record.timestamp }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+<a href="{{ url_for('video') }}" class="btn btn-primary">Back to Video Feed</a>
+{% endblock %}
