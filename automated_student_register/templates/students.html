@@ -1,8 +1,6 @@
 <!-- automated_student_register/templates/students.html -->
 {% extends "base.html" %}
-
 {% block title %}Student List{% endblock %}
-
 {% block content %}
 <h1 class="mt-5">Student List</h1>
 <table class="table mt-3">
@@ -32,6 +30,7 @@
             </td>
             <td>
                 <a href="{{ url_for('edit_student', student_id=student.student_id) }}" class="btn btn-warning">Edit</a>
+                <a href="{{ url_for('capture_face', student_id=student.student_id) }}" class="btn btn-success">Capture Face</a>
             </td>
         </tr>
         {% endfor %}

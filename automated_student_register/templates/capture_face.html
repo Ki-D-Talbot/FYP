@@ -1,0 +1,108 @@
+{% extends 'base.html' %}
+
+{% block title %}Capture Face{% endblock %}
+
+{% block content %}
+    <h2>Capture Face for {{ student.name }}</h2>
+    
+    <div class="row">
+        <div class="col-md-8">
+            <div class="card">
+                <div class="card-body">
+                    <video id="video" width="100%" height="auto" autoplay></video>
+                    <button id="capture-btn" class="btn btn-primary mt-3">Capture Face</button>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-4">
+            <div id="preview-container" style="display: none;">
+                <div class="card">
+                    <div class="card-header">Preview</div>
+                    <div class="card-body">
+                        <img id="preview" class="img-fluid" alt="Face Preview">
+                        <div class="mt-3">
+                            <button id="save-btn" class="btn btn-success">Save</button>
+                            <button id="retake-btn" class="btn btn-secondary">Retake</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        const video = document.getElementById('video');
+        const captureBtn = document.getElementById('capture-btn');
+        const previewContainer = document.getElementById('preview-container');
+        const preview = document.getElementById('preview');
+        const saveBtn = document.getElementById('save-btn');
+        const retakeBtn = document.getElementById('retake-btn');
+        const studentId = '{{ student.student_id }}';
+        let capturedImage = null;
+        
+        // Access webcam
+        async function startVideo() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                video.srcObject = stream;
+            } catch (err) {
+                console.error('Error accessing webcam:', err);
+                alert('Could not access webcam. Please ensure permissions are enabled.');
+            }
+        }
+        
+        // Capture image
+        captureBtn.addEventListener('click', () => {
+            const canvas = document.createElement('canvas');
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            canvas.getContext('2d').drawImage(video, 0, 0);
+            capturedImage = canvas.toDataURL('image/jpeg');
+            
+            preview.src = capturedImage;
+            previewContainer.style.display = 'block';
+        });
+        
+        // Retake photo
+        retakeBtn.addEventListener('click', () => {
+            capturedImage = null;
+            previewContainer.style.display = 'none';
+        });
+        
+        // Save photo
+        saveBtn.addEventListener('click', async () => {
+            if (!capturedImage) return;
+            
+            try {
+                // Convert base64 to blob
+                const response = await fetch(capturedImage);
+                const blob = await response.blob();
+                
+                const formData = new FormData();
+                formData.append('image', blob, 'face.jpg');
+                formData.append('student_id', studentId);
+                
+                const saveResponse = await fetch('/save_face', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const result = await saveResponse.json();
+                
+                if (saveResponse.ok) {
+                    alert('Face image saved successfully!');
+                    window.location.href = '/students';
+                } else {
+                    throw new Error(result.error || 'Failed to save face image');
+                }
+            } catch (err) {
+                console.error('Error saving face:', err);
+                alert(`Error: ${err.message}`);
+            }
+        });
+        
+        // Start webcam when page loads
+        window.addEventListener('load', startVideo);
+    </script>
+{% endblock %}
