@@ -5,7 +5,7 @@ import cv2
 import datetime
 import os
 import numpy as np
-import tensorflow as tf
+import tflite_runtime.interpreter as tflite
 from sklearn.metrics.pairwise import cosine_similarity
 
 app = Flask(__name__)
@@ -47,7 +47,7 @@ with app.app_context():
 def load_model():
     try:
         model_path = 'facial_recognition_model.h5'
-        model = tf.keras.models.load_model(model_path)
+        model = tflite.keras.models.load_model(model_path)
         print("Model loaded successfully")
         return model
     except Exception as e:
@@ -155,7 +155,7 @@ def save_face():
     try:
         image.save(image_path)
         
-        student = Student.query.get(student_id)
+        student = db.session.get(Student, student_id)
         if student:
             student.photo_path = image_path
             db.session.commit()
@@ -171,6 +171,7 @@ def video_feed():
         try:
             # Try first with PiCamera2
             try:
+                import numpy as np
                 from picamera2 import Picamera2
                 print("Using PiCamera2")
                 
@@ -231,6 +232,41 @@ def video_feed():
                    b'Content-Type: image/jpeg\r\n\r\n' + b'' + b'\r\n')
     
     return Response(generate_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
+
+@app.route('/basic_video_feed')
+def basic_video_feed():
+    def generate_frames():
+        try:
+            from picamera2 import Picamera2
+            
+            picam2 = Picamera2()
+            config = picam2.create_preview_configuration()
+            picam2.configure(config)
+            picam2.start()
+            
+            try:
+                while True:
+                    # Capture frame
+                    frame = picam2.capture_array()
+                    
+                    # Convert BGR to RGB if needed (depends on your picamera2 configuration)
+                    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    
+                    # Convert frame to JPEG
+                    ret, buffer = cv2.imencode('.jpg', frame)
+                    frame_bytes = buffer.tobytes()
+                    
+                    yield (b'--frame\r\n'
+                           b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+            finally:
+                picam2.stop()
+                print("Camera stopped")
+        except Exception as e:
+            print(f"Error in camera feed: {e}")
+    
+    return Response(generate_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
+
+    
 
 def log_attendance(student_id):
     # Prevent duplicate logs within short timeframe
