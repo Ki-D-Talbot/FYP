@@ -8,6 +8,7 @@ import numpy as np
 import subprocess
 import threading
 import time
+import traceback
 import signal
 import sys
 import tflite_runtime.interpreter as tflite
