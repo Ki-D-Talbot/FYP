@@ -226,16 +226,29 @@ def start_camera_service():
             except:
                 pass
             
-            # Get the full path to the script
-            current_dir = os.getcwd()
-            script_path = os.path.join(current_dir, "camera_service.py")
+            # Get the absolute path to the script
+            # Use the directory of the current script file to find camera_service.py
+            app_dir = os.path.dirname(os.path.abspath(__file__))
+            script_path = os.path.join(app_dir, "camera_service.py")
             
-            # Check if the file exists
+            # Fallback paths if the primary location doesn't work
+            fallback_paths = [
+                os.path.join(os.getcwd(), "camera_service.py"),
+                os.path.join(os.path.dirname(os.getcwd()), "automated_student_register", "camera_service.py")
+            ]
+            
+            # Check if the primary file exists
             if not os.path.exists(script_path):
-                return jsonify({
-                    "status": "error", 
-                    "message": f"Camera service file not found at: {script_path}"
-                })
+                # Try fallback paths
+                for path in fallback_paths:
+                    if os.path.exists(path):
+                        script_path = path
+                        break
+                else:  # No path was found
+                    return jsonify({
+                        "status": "error", 
+                        "message": f"Camera service file not found. Searched in: {script_path} and {fallback_paths}"
+                    })
             
             # Start the camera service as a subprocess with full path
             camera_service_process = subprocess.Popen(
