@@ -1,108 +1,108 @@
-{% extends 'base.html' %}
-
-{% block title %}Capture Face{% endblock %}
-
+{% extends "base.html" %}
+{% block title %}Capture Face - {{ student.name }}{% endblock %}
 {% block content %}
-    <h2>Capture Face for {{ student.name }}</h2>
-    
-    <div class="row">
-        <div class="col-md-8">
-            <div class="card">
-                <div class="card-body">
-                    <video id="video" width="100%" height="auto" autoplay></video>
-                    <button id="capture-btn" class="btn btn-primary mt-3">Capture Face</button>
-                </div>
+<h1 class="mt-4">Capture Face for {{ student.name }}</h1>
+
+<div class="row">
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-header">
+                <h5>Camera Preview</h5>
             </div>
-        </div>
-        
-        <div class="col-md-4">
-            <div id="preview-container" style="display: none;">
-                <div class="card">
-                    <div class="card-header">Preview</div>
-                    <div class="card-body">
-                        <img id="preview" class="img-fluid" alt="Face Preview">
-                        <div class="mt-3">
-                            <button id="save-btn" class="btn btn-success">Save</button>
-                            <button id="retake-btn" class="btn btn-secondary">Retake</button>
-                        </div>
-                    </div>
+            <div class="card-body text-center">
+                <video id="video" width="640" height="480" autoplay class="border"></video>
+                <div class="mt-3">
+                    <button id="captureBtn" class="btn btn-primary">
+                        <i class="fas fa-camera"></i> Capture Photo
+                    </button>
                 </div>
             </div>
         </div>
     </div>
     
-    <script>
-        const video = document.getElementById('video');
-        const captureBtn = document.getElementById('capture-btn');
-        const previewContainer = document.getElementById('preview-container');
-        const preview = document.getElementById('preview');
-        const saveBtn = document.getElementById('save-btn');
-        const retakeBtn = document.getElementById('retake-btn');
-        const studentId = '{{ student.student_id }}';
-        let capturedImage = null;
-        
-        // Access webcam
-        async function startVideo() {
-            try {
-                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-                video.srcObject = stream;
-            } catch (err) {
-                console.error('Error accessing webcam:', err);
-                alert('Could not access webcam. Please ensure permissions are enabled.');
-            }
+    <div class="col-md-4">
+        <div id="previewContainer" class="card d-none">
+            <div class="card-header">
+                <h5>Preview</h5>
+            </div>
+            <div class="card-body text-center">
+                <canvas id="canvas" width="320" height="240" class="border"></canvas>
+                <div class="mt-3">
+                    <button id="saveBtn" class="btn btn-success">
+                        <i class="fas fa-save"></i> Save
+                    </button>
+                    <button id="retakeBtn" class="btn btn-secondary">
+                        <i class="fas fa-redo"></i> Retake
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const captureBtn = document.getElementById('captureBtn');
+    const saveBtn = document.getElementById('saveBtn');
+    const retakeBtn = document.getElementById('retakeBtn');
+    const previewContainer = document.getElementById('previewContainer');
+    
+    // Start webcam
+    async function startWebcam() {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+            video.srcObject = stream;
+        } catch (err) {
+            console.error('Error accessing webcam:', err);
+            alert('Could not access webcam. Please ensure permissions are granted.');
         }
-        
-        // Capture image
-        captureBtn.addEventListener('click', () => {
-            const canvas = document.createElement('canvas');
-            canvas.width = video.videoWidth;
-            canvas.height = video.videoHeight;
-            canvas.getContext('2d').drawImage(video, 0, 0);
-            capturedImage = canvas.toDataURL('image/jpeg');
+    }
+    
+    // Start webcam when page loads
+    startWebcam();
+    
+    // Capture photo
+    captureBtn.addEventListener('click', function() {
+        const context = canvas.getContext('2d');
+        // Draw video frame onto canvas (scaled)
+        context.drawImage(video, 0, 0, canvas.width, canvas.height);
+        // Show preview
+        previewContainer.classList.remove('d-none');
+    });
+    
+    // Retake photo
+    retakeBtn.addEventListener('click', function() {
+        previewContainer.classList.add('d-none');
+    });
+    
+    // Save photo
+    saveBtn.addEventListener('click', function() {
+        canvas.toBlob(function(blob) {
+            const formData = new FormData();
+            formData.append('image', blob, 'face.jpg');
+            formData.append('student_id', '{{ student.student_id }}');
             
-            preview.src = capturedImage;
-            previewContainer.style.display = 'block';
-        });
-        
-        // Retake photo
-        retakeBtn.addEventListener('click', () => {
-            capturedImage = null;
-            previewContainer.style.display = 'none';
-        });
-        
-        // Save photo
-        saveBtn.addEventListener('click', async () => {
-            if (!capturedImage) return;
-            
-            try {
-                // Convert base64 to blob
-                const response = await fetch(capturedImage);
-                const blob = await response.blob();
-                
-                const formData = new FormData();
-                formData.append('image', blob, 'face.jpg');
-                formData.append('student_id', studentId);
-                
-                const saveResponse = await fetch('/save_face', {
-                    method: 'POST',
-                    body: formData
-                });
-                
-                const result = await saveResponse.json();
-                
-                if (saveResponse.ok) {
-                    alert('Face image saved successfully!');
+            fetch('/save_face', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    alert('Face saved successfully!');
                     window.location.href = '/students';
                 } else {
-                    throw new Error(result.error || 'Failed to save face image');
+                    throw new Error(data.error || 'Failed to save face');
                 }
-            } catch (err) {
-                console.error('Error saving face:', err);
-                alert(`Error: ${err.message}`);
-            }
-        });
-        
-        // Start webcam when page loads
-        window.addEventListener('load', startVideo);
-    </script>
+            })
+            .catch(error => {
+                console.error('Error saving face:', error);
+                alert('Error: ' + error.message);
+            });
+        }, 'image/jpeg', 0.95);
+    });
+});
+</script>
 {% endblock %}

@@ -1,28 +1,107 @@
-{% extends "base.html" %}
-{% block title %}Live Video Feed{% endblock %}
-{% block content %}
-<h1 class="mt-5">Live Video Feed</h1>
+{% extends 'base.html' %}
 
-<div class="card">
-    <div class="card-header">
-        Camera Feed
+{% block content %}
+<div class="container">
+    <h1 class="mb-4">Live Video Feed</h1>
+    
+    <div class="row mb-4">
+        <div class="col-md-12">
+            <button id="startCameraBtn" class="btn btn-success">Start Camera Service</button>
+            <button id="stopCameraBtn" class="btn btn-danger">Stop Camera Service</button>
+            <span id="statusIndicator" class="ml-3">Status: Checking...</span>
+        </div>
     </div>
-    <div class="card-body">
-        <div style="width: 100%; text-align: center;">
-            <!-- Add a border to make it obvious where the video should be -->
-            <img src="{{ url_for('video_feed') }}" style="max-width: 100%; height: auto; border: 3px solid red;" alt="Video feed unavailable">
+    
+    <div class="row">
+        <div class="col-md-12">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="card-title">Camera Feed</h5>
+                </div>
+                <div class="card-body">
+                    <img src="{{ url_for('video_feed') }}" width="100%" alt="Video feed not available">
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="row mt-4">
+        <div class="col-md-12">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="card-title">Recent Detections</h5>
+                </div>
+                <div class="card-body" id="detectionsList">
+                    <p>No recent detections</p>
+                </div>
+            </div>
         </div>
     </div>
 </div>
 
-<div class="mt-3">
-    <div class="alert alert-info">
-        <p>If the video feed is empty:</p>
-        <ol>
-            <li>Check that your camera is properly connected</li>
-            <li>Verify that no other application is using the camera</li>
-            <li>Check the console logs for any errors</li>
-        </ol>
-    </div>
-</div>
+<script>
+    // Check camera service status
+    function checkStatus() {
+        fetch('/camera_service_status')
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'running') {
+                    document.getElementById('statusIndicator').innerHTML = 'Status: <span class="text-success">Running</span>';
+                    document.getElementById('startCameraBtn').disabled = true;
+                    document.getElementById('stopCameraBtn').disabled = false;
+                } else {
+                    document.getElementById('statusIndicator').innerHTML = 'Status: <span class="text-danger">Stopped</span>';
+                    document.getElementById('startCameraBtn').disabled = false;
+                    document.getElementById('stopCameraBtn').disabled = true;
+                }
+            })
+            .catch(error => {
+                console.error('Error checking status:', error);
+                document.getElementById('statusIndicator').innerHTML = 'Status: <span class="text-warning">Unknown</span>';
+            });
+    }
+    
+    // Start camera service
+    document.getElementById('startCameraBtn').addEventListener('click', function() {
+        fetch('/start_camera_service')
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    alert('Camera service started successfully');
+                    checkStatus();
+                } else {
+                    alert('Failed to start camera service: ' + data.message);
+                }
+            })
+            .catch(error => {
+                console.error('Error starting camera service:', error);
+                alert('Error starting camera service');
+            });
+    });
+    
+    // Stop camera service
+    document.getElementById('stopCameraBtn').addEventListener('click', function() {
+        fetch('/stop_camera_service')
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    alert('Camera service stopped successfully');
+                    checkStatus();
+                } else {
+                    alert('Failed to stop camera service: ' + data.message);
+                }
+            })
+            .catch(error => {
+                console.error('Error stopping camera service:', error);
+                alert('Error stopping camera service');
+            });
+    });
+    
+    // Check status on page load
+    document.addEventListener('DOMContentLoaded', function() {
+        checkStatus();
+        // Check status every 5 seconds
+        setInterval(checkStatus, 5000);
+    });
+</script>
 {% endblock %}

@@ -5,8 +5,16 @@ import cv2
 import datetime
 import os
 import numpy as np
+import subprocess
+import threading
+import time
+import signal
+import sys
 import tflite_runtime.interpreter as tflite
 from sklearn.metrics.pairwise import cosine_similarity
+
+camera_service_process = None
+camera_lock = threading.Lock()
 
 app = Flask(__name__)
 app.secret_key = 'your_secret_key' 
@@ -46,10 +54,11 @@ with app.app_context():
 # Load facial recognition model
 def load_model():
     try:
-        model_path = 'facial_recognition_model.h5'
-        model = tflite.keras.models.load_model(model_path)
+        model_path = 'facial_recognition_model.tflite'  
+        interpreter = tflite.Interpreter(model_path=model_path)
+        interpreter.allocate_tensors()
         print("Model loaded successfully")
-        return model
+        return interpreter
     except Exception as e:
         print(f"Error loading model: {e}")
         return None
@@ -165,74 +174,6 @@ def save_face():
         print(f"Error saving face: {e}")
         return jsonify({"error": str(e)}), 500
 
-@app.route('/video_feed')
-def video_feed():
-    def generate_frames():
-        try:
-            # Try first with PiCamera2
-            try:
-                import numpy as np
-                from picamera2 import Picamera2
-                print("Using PiCamera2")
-                
-                picam2 = Picamera2()
-                config = picam2.create_preview_configuration()
-                picam2.configure(config)
-                picam2.start()
-                
-                while True:
-                    # Capture frame
-                    frame = picam2.capture_array()
-                    print("Captured frame with PiCamera2")
-                    
-                    # Convert to BGR for OpenCV processing
-                    if frame.shape[2] == 3:  # If it's an RGB image
-                        frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-                    
-                    # Convert frame to JPEG
-                    ret, buffer = cv2.imencode('.jpg', frame)
-                    frame_bytes = buffer.tobytes()
-                    
-                    # Yield the frame
-                    yield (b'--frame\r\n'
-                           b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-            
-            except (ImportError, ModuleNotFoundError):
-                # Fall back to OpenCV if PiCamera2 isn't available
-                print("PiCamera2 not available, falling back to OpenCV")
-                camera = cv2.VideoCapture(0)
-                
-                if not camera.isOpened():
-                    print("Failed to open camera with OpenCV")
-                    yield (b'--frame\r\n'
-                           b'Content-Type: image/jpeg\r\n\r\n' + b'' + b'\r\n')
-                    return
-                
-                while True:
-                    success, frame = camera.read()
-                    if not success:
-                        print("Failed to capture frame with OpenCV")
-                        break
-                    
-                    print("Captured frame with OpenCV")
-                    
-                    # Convert frame to JPEG
-                    ret, buffer = cv2.imencode('.jpg', frame)
-                    frame_bytes = buffer.tobytes()
-                    
-                    # Yield the frame
-                    yield (b'--frame\r\n'
-                           b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-                
-                camera.release()
-        
-        except Exception as e:
-            print(f"Error in generate_frames: {e}")
-            yield (b'--frame\r\n'
-                   b'Content-Type: image/jpeg\r\n\r\n' + b'' + b'\r\n')
-    
-    return Response(generate_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
-
 @app.route('/basic_video_feed')
 def basic_video_feed():
     def generate_frames():
@@ -263,6 +204,105 @@ def basic_video_feed():
                 print("Camera stopped")
         except Exception as e:
             print(f"Error in camera feed: {e}")
+    
+    return Response(generate_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
+
+@app.route('/start_camera_service')
+@login_required
+def start_camera_service():
+    global camera_service_process
+    
+    try:
+        with camera_lock:
+            # Check if service is already running
+            if camera_service_process and camera_service_process.poll() is None:
+                return jsonify({"status": "already_running", "message": "Camera service is already running"})
+            
+            # Kill any existing camera processes
+            try:
+                subprocess.run(["pkill", "-f", "libcamera"], stderr=subprocess.DEVNULL)
+                time.sleep(0.5)  # Give time for cleanup
+            except:
+                pass
+            
+            # Start the camera service as a subprocess
+            camera_service_process = subprocess.Popen(
+                [sys.executable, "camera_service.py"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE
+            )
+            
+            # Give it time to start
+            time.sleep(1)
+            
+            if camera_service_process.poll() is None:
+                return jsonify({"status": "success", "message": "Camera service started successfully"})
+            else:
+                stderr = camera_service_process.stderr.read().decode()
+                return jsonify({"status": "error", "message": f"Failed to start camera service: {stderr}"})
+    except Exception as e:
+        return jsonify({"status": "error", "message": f"Error: {str(e)}"})
+
+@app.route('/stop_camera_service')
+@login_required
+def stop_camera_service():
+    global camera_service_process
+    
+    try:
+        with camera_lock:
+            if camera_service_process and camera_service_process.poll() is None:
+                camera_service_process.terminate()
+                time.sleep(0.5)
+                if camera_service_process.poll() is None:
+                    camera_service_process.kill()
+                return jsonify({"status": "success", "message": "Camera service stopped"})
+            else:
+                return jsonify({"status": "not_running", "message": "Camera service is not running"})
+    except Exception as e:
+        return jsonify({"status": "error", "message": f"Error: {str(e)}"})
+
+@app.route('/camera_service_status')
+@login_required
+def camera_service_status():
+    global camera_service_process
+    
+    try:
+        with camera_lock:
+            if camera_service_process and camera_service_process.poll() is None:
+                return jsonify({"status": "running"})
+            else:
+                return jsonify({"status": "stopped"})
+    except Exception as e:
+        return jsonify({"status": "error", "message": f"Error: {str(e)}"})
+
+# Modify video_feed function to use the current frame from camera_service
+@app.route('/video_feed')
+def video_feed():
+    def generate_frames():
+        while True:
+            try:
+                # Check if the current frame exists
+                current_frame_path = 'static/current/frame.jpg'
+                
+                if os.path.exists(current_frame_path):
+                    # Read the current frame saved by the camera service
+                    frame = cv2.imread(current_frame_path)
+                    
+                    if frame is not None:
+                        # Convert frame to JPEG
+                        ret, buffer = cv2.imencode('.jpg', frame)
+                        frame_bytes = buffer.tobytes()
+                        
+                        # Yield the frame
+                        yield (b'--frame\r\n'
+                               b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+                
+                # Sleep to avoid excessive CPU usage
+                time.sleep(0.1)
+                
+            except Exception as e:
+                print(f"Error in generate_frames: {e}")
+                time.sleep(1)
     
     return Response(generate_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
