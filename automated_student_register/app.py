@@ -218,31 +218,40 @@ def start_camera_service():
             if camera_service_process and camera_service_process.poll() is None:
                 return jsonify({"status": "already_running", "message": "Camera service is already running"})
             
+            # Make sure the camera service script exists
+            if not os.path.exists("camera_service.py"):
+                return jsonify({"status": "error", "message": "Camera service script not found"})
+            
+            # Make script executable
+            os.chmod("camera_service.py", 0o755)
+            
             # Kill any existing camera processes
             try:
                 subprocess.run(["pkill", "-f", "libcamera"], stderr=subprocess.DEVNULL)
-                time.sleep(0.5)  # Give time for cleanup
+                subprocess.run(["pkill", "-f", "camera_service.py"], stderr=subprocess.DEVNULL)
+                time.sleep(1)  # Give time for cleanup
             except:
                 pass
             
             # Start the camera service as a subprocess
+            log_file = open("camera_service.log", "a")
             camera_service_process = subprocess.Popen(
                 [sys.executable, "camera_service.py"],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE
+                stdout=log_file,
+                stderr=log_file
             )
             
             # Give it time to start
-            time.sleep(1)
+            time.sleep(2)
             
             if camera_service_process.poll() is None:
                 return jsonify({"status": "success", "message": "Camera service started successfully"})
             else:
-                stderr = camera_service_process.stderr.read().decode()
+                stderr = log_file.read()
                 return jsonify({"status": "error", "message": f"Failed to start camera service: {stderr}"})
     except Exception as e:
         return jsonify({"status": "error", "message": f"Error: {str(e)}"})
-
+    
 @app.route('/stop_camera_service')
 @login_required
 def stop_camera_service():
@@ -275,7 +284,6 @@ def camera_service_status():
     except Exception as e:
         return jsonify({"status": "error", "message": f"Error: {str(e)}"})
 
-# Modify video_feed function to use the current frame from camera_service
 @app.route('/video_feed')
 def video_feed():
     def generate_frames():
@@ -285,18 +293,46 @@ def video_feed():
                 current_frame_path = 'static/current/frame.jpg'
                 
                 if os.path.exists(current_frame_path):
-                    # Read the current frame saved by the camera service
-                    frame = cv2.imread(current_frame_path)
+                    # Get modification time
+                    mod_time = os.path.getmtime(current_frame_path)
+                    current_time = time.time()
                     
-                    if frame is not None:
-                        # Convert frame to JPEG
+                    # Only use frame if it's recent (less than 10 seconds old)
+                    if current_time - mod_time < 10:
+                        # Read the current frame saved by the camera service
+                        frame = cv2.imread(current_frame_path)
+                        
+                        if frame is not None:
+                            # Convert frame to JPEG
+                            ret, buffer = cv2.imencode('.jpg', frame)
+                            frame_bytes = buffer.tobytes()
+                            
+                            # Yield the frame
+                            yield (b'--frame\r\n'
+                                   b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+                    else:
+                        # Frame is too old, create a blank frame with message
+                        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+                        cv2.putText(frame, "Camera feed not updating", (50, 240), 
+                                    cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+                        
                         ret, buffer = cv2.imencode('.jpg', frame)
                         frame_bytes = buffer.tobytes()
                         
-                        # Yield the frame
                         yield (b'--frame\r\n'
                                b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-                
+                else:
+                    # No frame file, create a blank frame with message
+                    frame = np.zeros((480, 640, 3), dtype=np.uint8)
+                    cv2.putText(frame, "Camera not running", (50, 240), 
+                                cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+                    
+                    ret, buffer = cv2.imencode('.jpg', frame)
+                    frame_bytes = buffer.tobytes()
+                    
+                    yield (b'--frame\r\n'
+                           b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+                    
                 # Sleep to avoid excessive CPU usage
                 time.sleep(0.1)
                 
@@ -305,8 +341,6 @@ def video_feed():
                 time.sleep(1)
     
     return Response(generate_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
-
-    
 
 def log_attendance(student_id):
     # Prevent duplicate logs within short timeframe
@@ -348,6 +382,88 @@ def check_attendance():
         })
     
     return render_template('check_attendance.html', attendance_data=attendance_data)
+
+@app.route('/get_detection_results')
+def get_detection_results():
+    """API endpoint to get the latest detection results"""
+    try:
+        detection_file = 'static/current/detection_results.txt'
+        if os.path.exists(detection_file):
+            # Get file modification time
+            mod_time = os.path.getmtime(detection_file)
+            timestamp = datetime.datetime.fromtimestamp(mod_time).strftime('%Y-%m-%d %H:%M:%S')
+            
+            # Check if file is recent (less than 30 seconds old)
+            time_diff = time.time() - mod_time
+            is_recent = time_diff < 30
+            
+            # Read the file contents
+            with open(detection_file, 'r') as f:
+                content = f.read()
+                
+            return jsonify({
+                'status': 'success',
+                'content': content,
+                'timestamp': timestamp,
+                'is_recent': is_recent
+            })
+        else:
+            return jsonify({
+                'status': 'no_data',
+                'message': 'No detection results available'
+            })
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        })
+    
+@app.route('/today_attendance')
+@login_required
+def today_attendance():
+    """API endpoint to get today's attendance"""
+    try:
+        # Get today's date at midnight
+        today_start = datetime.datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        
+        # Query for today's attendance with student names
+        attendance_records = db.session.query(
+            Attendance, Student.name
+        ).join(
+            Student, Attendance.student_id == Student.student_id
+        ).filter(
+            Attendance.timestamp >= today_start
+        ).order_by(
+            Attendance.timestamp.desc()
+        ).all()
+        
+        # Format the results
+        students = []
+        for attendance, name in attendance_records:
+            students.append({
+                'id': attendance.student_id,
+                'name': name,
+                'time': attendance.timestamp.strftime('%H:%M:%S')
+            })
+        
+        # Get unique students (first appearance only)
+        unique_students = []
+        seen_ids = set()
+        for student in students:
+            if student['id'] not in seen_ids:
+                unique_students.append(student)
+                seen_ids.add(student['id'])
+        
+        return jsonify({
+            'status': 'success',
+            'total_count': len(unique_students),
+            'students': unique_students
+        })
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        })
 
 if __name__ == '__main__':
     app.run(debug=True)

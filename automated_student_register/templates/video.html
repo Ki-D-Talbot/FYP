@@ -2,7 +2,7 @@
 
 {% block content %}
 <div class="container">
-    <h1 class="mb-4">Live Video Feed</h1>
+    <h1 class="mb-4">Live Face Recognition</h1>
     
     <div class="row mb-4">
         <div class="col-md-12">
@@ -13,26 +13,36 @@
     </div>
     
     <div class="row">
-        <div class="col-md-12">
+        <div class="col-md-8">
             <div class="card">
-                <div class="card-header">
-                    <h5 class="card-title">Camera Feed</h5>
+                <div class="card-header bg-primary text-white">
+                    <h5 class="card-title mb-0">Camera Feed</h5>
                 </div>
-                <div class="card-body">
+                <div class="card-body p-0">
                     <img src="{{ url_for('video_feed') }}" width="100%" alt="Video feed not available">
                 </div>
             </div>
         </div>
-    </div>
-    
-    <div class="row mt-4">
-        <div class="col-md-12">
+        
+        <div class="col-md-4">
             <div class="card">
-                <div class="card-header">
-                    <h5 class="card-title">Recent Detections</h5>
+                <div class="card-header bg-success text-white">
+                    <h5 class="card-title mb-0">Live Detections</h5>
                 </div>
                 <div class="card-body" id="detectionsList">
                     <p>No recent detections</p>
+                </div>
+                <div class="card-footer">
+                    <small class="text-muted" id="detectionTimestamp">Last updated: Never</small>
+                </div>
+            </div>
+            
+            <div class="card mt-3">
+                <div class="card-header bg-info text-white">
+                    <h5 class="card-title mb-0">Today's Attendance</h5>
+                </div>
+                <div class="card-body" id="todayAttendance">
+                    <p>Loading attendance data...</p>
                 </div>
             </div>
         </div>
@@ -58,6 +68,93 @@
             .catch(error => {
                 console.error('Error checking status:', error);
                 document.getElementById('statusIndicator').innerHTML = 'Status: <span class="text-warning">Unknown</span>';
+            });
+    }
+    
+    // Get latest detection results
+    function updateDetections() {
+        fetch('/get_detection_results')
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    // Format and display the detection results
+                    let detectionHTML = '<div class="detection-results">';
+                    const lines = data.content.split('\n');
+                    
+                    // Process each line
+                    lines.forEach(line => {
+                        if (line.startsWith('Timestamp:')) {
+                            detectionHTML += `<p class="text-muted">${line}</p>`;
+                        } else if (line.startsWith('Detected students:')) {
+                            // Extract student names
+                            const students = line.replace('Detected students:', '').trim();
+                            if (students) {
+                                const studentArray = students.split(',').map(s => s.trim());
+                                detectionHTML += '<ul class="list-group">';
+                                studentArray.forEach(student => {
+                                    detectionHTML += `<li class="list-group-item list-group-item-success">${student}</li>`;
+                                });
+                                detectionHTML += '</ul>';
+                            } else {
+                                detectionHTML += '<p>No students detected</p>';
+                            }
+                        } else if (line.trim()) {
+                            detectionHTML += `<p>${line}</p>`;
+                        }
+                    });
+                    
+                    detectionHTML += '</div>';
+                    document.getElementById('detectionsList').innerHTML = detectionHTML;
+                    document.getElementById('detectionTimestamp').textContent = `Last updated: ${data.timestamp}`;
+                    
+                    // Highlight if the data is recent
+                    if (data.is_recent) {
+                        document.getElementById('detectionTimestamp').className = 'text-success';
+                    } else {
+                        document.getElementById('detectionTimestamp').className = 'text-muted';
+                    }
+                } else if (data.status === 'no_data') {
+                    document.getElementById('detectionsList').innerHTML = '<p>No detection data available</p>';
+                    document.getElementById('detectionTimestamp').textContent = 'Last updated: Never';
+                    document.getElementById('detectionTimestamp').className = 'text-muted';
+                }
+            })
+            .catch(error => {
+                console.error('Error fetching detection results:', error);
+            });
+    }
+    
+    // Get today's attendance
+    function updateAttendance() {
+        fetch('/today_attendance')
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    let attendanceHTML = '<div class="attendance-summary">';
+                    attendanceHTML += `<p>Total students today: <strong>${data.total_count}</strong></p>`;
+                    
+                    if (data.students.length > 0) {
+                        attendanceHTML += '<ul class="list-group">';
+                        data.students.forEach(student => {
+                            attendanceHTML += `<li class="list-group-item d-flex justify-content-between align-items-center">
+                                ${student.name}
+                                <span class="badge badge-primary badge-pill">${student.time}</span>
+                            </li>`;
+                        });
+                        attendanceHTML += '</ul>';
+                    } else {
+                        attendanceHTML += '<p>No attendance records for today</p>';
+                    }
+                    
+                    attendanceHTML += '</div>';
+                    document.getElementById('todayAttendance').innerHTML = attendanceHTML;
+                } else {
+                    document.getElementById('todayAttendance').innerHTML = '<p>Failed to load attendance data</p>';
+                }
+            })
+            .catch(error => {
+                console.error('Error fetching attendance:', error);
+                document.getElementById('todayAttendance').innerHTML = '<p>Error loading attendance data</p>';
             });
     }
     
@@ -100,8 +197,13 @@
     // Check status on page load
     document.addEventListener('DOMContentLoaded', function() {
         checkStatus();
-        // Check status every 5 seconds
+        updateDetections();
+        updateAttendance();
+        
+        // Set up periodic updates
         setInterval(checkStatus, 5000);
+        setInterval(updateDetections, 2000);
+        setInterval(updateAttendance, 10000);
     });
 </script>
 {% endblock %}
