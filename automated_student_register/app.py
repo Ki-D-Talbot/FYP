@@ -218,39 +218,52 @@ def start_camera_service():
             if camera_service_process and camera_service_process.poll() is None:
                 return jsonify({"status": "already_running", "message": "Camera service is already running"})
             
-            # Make sure the camera service script exists
-            if not os.path.exists("camera_service.py"):
-                return jsonify({"status": "error", "message": "Camera service script not found"})
-            
-            # Make script executable
-            os.chmod("camera_service.py", 0o755)
-            
             # Kill any existing camera processes
             try:
                 subprocess.run(["pkill", "-f", "libcamera"], stderr=subprocess.DEVNULL)
-                subprocess.run(["pkill", "-f", "camera_service.py"], stderr=subprocess.DEVNULL)
-                time.sleep(1)  # Give time for cleanup
+                time.sleep(0.5)  # Give time for cleanup
             except:
                 pass
             
-            # Start the camera service as a subprocess
-            log_file = open("camera_service.log", "a")
+            # Get the full path to the script
+            current_dir = os.getcwd()
+            script_path = os.path.join(current_dir, "camera_service.py")
+            
+            # Check if the file exists
+            if not os.path.exists(script_path):
+                return jsonify({
+                    "status": "error", 
+                    "message": f"Camera service file not found at: {script_path}"
+                })
+            
+            # Start the camera service as a subprocess with full path
             camera_service_process = subprocess.Popen(
-                [sys.executable, "camera_service.py"],
-                stdout=log_file,
-                stderr=log_file
+                [sys.executable, script_path],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE
             )
             
             # Give it time to start
-            time.sleep(2)
+            time.sleep(1)
             
             if camera_service_process.poll() is None:
-                return jsonify({"status": "success", "message": "Camera service started successfully"})
+                return jsonify({
+                    "status": "success", 
+                    "message": f"Camera service started successfully with path: {script_path}"
+                })
             else:
-                stderr = log_file.read()
-                return jsonify({"status": "error", "message": f"Failed to start camera service: {stderr}"})
+                stderr = camera_service_process.stderr.read().decode()
+                return jsonify({
+                    "status": "error", 
+                    "message": f"Failed to start camera service: {stderr}",
+                    "path_used": script_path
+                })
     except Exception as e:
-        return jsonify({"status": "error", "message": f"Error: {str(e)}"})
+        return jsonify({
+            "status": "error", 
+            "message": f"Error: {str(e)}",
+            "traceback": traceback.format_exc()
+        })
     
 @app.route('/stop_camera_service')
 @login_required
