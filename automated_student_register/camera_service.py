@@ -104,46 +104,53 @@ def recognize_student(face_img, conn):
         cv2.normalize(face_hist, face_hist, 0, 1, cv2.NORM_MINMAX)
         
         for student_id, name, photo_path in students:
-            # Resolve the relative path to absolute path
-            # Check if the path is already absolute
-            if os.path.isabs(photo_path):
-                abs_photo_path = photo_path
-            else:
-                abs_photo_path = os.path.join(BASE_DIR, photo_path)
+            try:
+                # Resolve the relative path to absolute path
+                if os.path.isabs(photo_path):
+                    abs_photo_path = photo_path
+                else:
+                    abs_photo_path = os.path.join(BASE_DIR, photo_path)
+                    
+                # Check if the file exists
+                if not os.path.exists(abs_photo_path):
+                    # Try an alternative path
+                    alt_path = os.path.join(BASE_DIR, 'static', 'student_faces', student_id, 'face.jpg')
+                    if os.path.exists(alt_path):
+                        abs_photo_path = alt_path
+                    else:
+                        log_message(f"Warning: Photo file not found for student {student_id}: {abs_photo_path}")
+                        continue
+                    
+                # Load the student's reference face
+                ref_face = cv2.imread(abs_photo_path)
+                if ref_face is None:
+                    log_message(f"Warning: Could not read photo file for student {student_id}: {abs_photo_path}")
+                    continue
                 
-            # Check if the file exists
-            if not os.path.exists(abs_photo_path):
-                log_message(f"Warning: Photo file not found for student {student_id}: {abs_photo_path}")
-                continue
+                # Convert to grayscale if needed
+                if len(ref_face.shape) == 3:
+                    ref_face_gray = cv2.cvtColor(ref_face, cv2.COLOR_BGR2GRAY)
+                else:
+                    ref_face_gray = ref_face
+                    
+                # Resize for consistency
+                ref_face_resized = cv2.resize(ref_face_gray, (100, 100))
                 
-            # Load the student's reference face
-            ref_face = cv2.imread(abs_photo_path)
-            if ref_face is None:
-                log_message(f"Warning: Could not read photo file for student {student_id}: {abs_photo_path}")
-                continue
-            
-            # Convert to grayscale if needed
-            if len(ref_face.shape) == 3:
-                ref_face_gray = cv2.cvtColor(ref_face, cv2.COLOR_BGR2GRAY)
-            else:
-                ref_face_gray = ref_face
+                # Calculate histogram for reference face
+                ref_hist = cv2.calcHist([ref_face_resized], [0], None, [256], [0, 256])
+                cv2.normalize(ref_hist, ref_hist, 0, 1, cv2.NORM_MINMAX)
                 
-            # Resize for consistency
-            ref_face_resized = cv2.resize(ref_face_gray, (100, 100))
-            
-            # Calculate histogram for reference face
-            ref_hist = cv2.calcHist([ref_face_resized], [0], None, [256], [0, 256])
-            cv2.normalize(ref_hist, ref_hist, 0, 1, cv2.NORM_MINMAX)
-            
-            # Compare histograms
-            score = cv2.compareHist(face_hist, ref_hist, cv2.HISTCMP_CORREL)
-            
-            log_message(f"Match score for student {name}: {score:.2f}")
-            
-            if score > best_match_score and score > threshold:
-                best_match_score = score
-                best_match_id = student_id
-                best_match_name = name
+                # Compare histograms
+                score = cv2.compareHist(face_hist, ref_hist, cv2.HISTCMP_CORREL)
+                
+                log_message(f"Match score for student {name}: {score:.2f}")
+                
+                if score > best_match_score and score > threshold:
+                    best_match_score = score
+                    best_match_id = student_id
+                    best_match_name = name
+            except Exception as e:
+                log_message(f"Error processing student {student_id}: {e}")
         
         if best_match_id:
             log_message(f"Best match: {best_match_name} (ID: {best_match_id}) with score {best_match_score:.2f}")

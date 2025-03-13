@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, url_for, flash, session, Response, jsonify
+from flask import Flask, render_template, request, redirect, url_for, flash, session, Response, jsonify, send_file
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 import cv2
@@ -161,9 +161,9 @@ def save_face():
     if not student_id:
         return jsonify({"error": "No student ID provided"}), 400
     
-    # Use a consistent BASE_DIR for all file operations
+    # Use absolute paths for internal processing
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-    student_folder = os.path.join(BASE_DIR, 'student_faces', student_id)
+    student_folder = os.path.join(BASE_DIR, 'static', 'student_faces', student_id)
     os.makedirs(student_folder, exist_ok=True)
     
     image_path = os.path.join(student_folder, 'face.jpg')
@@ -233,8 +233,8 @@ def save_face():
             face_img = img[y:y+h, x:x+w]
             cv2.imwrite(image_path, face_img)
         
-        # Store the RELATIVE path in the database
-        rel_path = os.path.join('student_faces', student_id, 'face.jpg')
+        # Store the path in the database - used relative URL path for browser access
+        rel_path = os.path.join('static', 'student_faces', student_id, 'face.jpg')
         
         student = db.session.get(Student, student_id)
         if student:
@@ -458,56 +458,41 @@ def video_feed():
 def capture_feed():
     """A lighter version of the video feed for capture face page"""
     def generate_frames():
+        # Don't try PiCamera if camera service is already running
+        camera_in_use = False
+        with camera_lock:
+            if camera_service_process and camera_service_process.poll() is None:
+                camera_in_use = True
+                
         try:
-            # First try with PiCamera2 for Raspberry Pi
-            try:
-                from picamera2 import Picamera2
+            # First try with OpenCV which is more reliable for this purpose
+            cap = cv2.VideoCapture(0)
+            if not cap.isOpened():
+                raise Exception("Could not open webcam")
                 
-                picam2 = Picamera2()
-                config = picam2.create_preview_configuration(main={"size": (640, 480)})
-                picam2.configure(config)
-                picam2.start()
-                
-                try:
-                    while True:
-                        frame = picam2.capture_array()
-                        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                        
-                        # Use lower quality encoding for performance
-                        encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 70]
-                        ret, buffer = cv2.imencode('.jpg', frame, encode_param)
-                        frame_bytes = buffer.tobytes()
-                        
-                        yield (b'--frame\r\n'
-                               b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-                        time.sleep(0.1)  # Reduce framerate for better performance
-                finally:
-                    picam2.stop()
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
             
-            # If PiCamera fails, try OpenCV with standard webcam
-            except (ImportError, Exception) as e:
-                print(f"PiCamera error: {e}, falling back to OpenCV")
-                cap = cv2.VideoCapture(0)
-                cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-                
-                try:
-                    while True:
-                        success, frame = cap.read()
-                        if not success:
-                            break
-                            
-                        # Use lower quality encoding for performance
-                        encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 70]
-                        ret, buffer = cv2.imencode('.jpg', frame, encode_param)
-                        frame_bytes = buffer.tobytes()
+            try:
+                while True:
+                    success, frame = cap.read()
+                    if not success:
+                        break
                         
-                        yield (b'--frame\r\n'
-                               b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-                        time.sleep(0.1)  # Reduce framerate for better performance
-                finally:
-                    cap.release()
+                    # Use lower quality encoding for performance
+                    encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 70]
+                    ret, buffer = cv2.imencode('.jpg', frame, encode_param)
+                    if not ret:
+                        continue
+                        
+                    frame_bytes = buffer.tobytes()
                     
+                    yield (b'--frame\r\n'
+                           b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+                    time.sleep(0.1)  # Reduce framerate for better performance
+            finally:
+                cap.release()
+                
         except Exception as e:
             print(f"Error in capture_feed: {e}")
             # Return a blank frame with error message
@@ -692,6 +677,31 @@ def debug_camera():
         debug_info['frame_age_seconds'] = current_time - mod_time
     
     return jsonify(debug_info)
+
+@app.route('/student_faces/<student_id>/face.jpg')
+def serve_student_face(student_id):
+    """Serve student face image"""
+    try:
+        # Look up the actual path from the database
+        student = db.session.get(Student, student_id)
+        if not student or not student.photo_path:
+            return "No face image found", 404
+        
+        # Get the absolute path to the file
+        BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+        # The photo_path should now be relative to the app directory
+        if os.path.isabs(student.photo_path):
+            face_path = student.photo_path
+        else:
+            face_path = os.path.join(BASE_DIR, student.photo_path)
+        
+        if not os.path.exists(face_path):
+            return "Face image not found at specified path", 404
+            
+        return send_file(face_path, mimetype='image/jpeg')
+    except Exception as e:
+        print(f"Error serving student face: {e}")
+        return str(e), 500
 
 if __name__ == '__main__':
     app.run(debug=True)
