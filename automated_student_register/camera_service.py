@@ -78,17 +78,10 @@ def log_attendance(student_id, db_path='database.db'):
 def recognize_student(face_img, conn):
     """
     Recognize a student face by comparing with stored faces
-    
-    Args:
-        face_img: The detected face image
-        conn: Database connection
-        
-    Returns:
-        student_id, name if recognized, or None, None if not recognized
     """
     try:
         # Convert to proper size for recognition
-        face_img_resized = cv2.resize(face_img, (160, 160))
+        face_img_resized = cv2.resize(face_img, (100, 100))
         
         # Get all student IDs and their photo paths from the database
         cursor = conn.cursor()
@@ -96,46 +89,67 @@ def recognize_student(face_img, conn):
         students = cursor.fetchall()
         
         if not students:
-            log_message("No students with registered faces found in database")
             return None, None
         
         best_match_id = None
         best_match_name = None
         best_match_score = 0
-        threshold = 0.65  # Minimum similarity threshold
+        threshold = 0.50  # Lower threshold for better matching
+        
+        # Get the base directory for consistent path resolution
+        BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+        
+        # Calculate histogram for input face
+        face_hist = cv2.calcHist([face_img_resized], [0], None, [256], [0, 256])
+        cv2.normalize(face_hist, face_hist, 0, 1, cv2.NORM_MINMAX)
         
         for student_id, name, photo_path in students:
-            # Check if the photo path exists
-            if not os.path.exists(photo_path):
-                log_message(f"Student photo not found: {photo_path}")
+            # Resolve the relative path to absolute path
+            # Check if the path is already absolute
+            if os.path.isabs(photo_path):
+                abs_photo_path = photo_path
+            else:
+                abs_photo_path = os.path.join(BASE_DIR, photo_path)
+                
+            # Check if the file exists
+            if not os.path.exists(abs_photo_path):
+                log_message(f"Warning: Photo file not found for student {student_id}: {abs_photo_path}")
+                continue
+                
+            # Load the student's reference face
+            ref_face = cv2.imread(abs_photo_path)
+            if ref_face is None:
+                log_message(f"Warning: Could not read photo file for student {student_id}: {abs_photo_path}")
                 continue
             
-            # Load the stored face image
-            stored_face = cv2.imread(photo_path, cv2.IMREAD_GRAYSCALE)
-            if stored_face is None:
-                log_message(f"Failed to load student photo: {photo_path}")
-                continue
+            # Convert to grayscale if needed
+            if len(ref_face.shape) == 3:
+                ref_face_gray = cv2.cvtColor(ref_face, cv2.COLOR_BGR2GRAY)
+            else:
+                ref_face_gray = ref_face
+                
+            # Resize for consistency
+            ref_face_resized = cv2.resize(ref_face_gray, (100, 100))
             
-            # Resize stored face to match
-            stored_face_resized = cv2.resize(stored_face, (160, 160))
+            # Calculate histogram for reference face
+            ref_hist = cv2.calcHist([ref_face_resized], [0], None, [256], [0, 256])
+            cv2.normalize(ref_hist, ref_hist, 0, 1, cv2.NORM_MINMAX)
             
-            # Compare faces using template matching
-            # This is a simple comparison - in production you'd use a proper face recognition model
-            result = cv2.matchTemplate(face_img_resized, stored_face_resized, cv2.TM_CCOEFF_NORMED)
-            similarity = np.max(result)
+            # Compare histograms
+            score = cv2.compareHist(face_hist, ref_hist, cv2.HISTCMP_CORREL)
             
-            log_message(f"Similarity with {name} (ID: {student_id}): {similarity:.2f}")
+            log_message(f"Match score for student {name}: {score:.2f}")
             
-            if similarity > threshold and similarity > best_match_score:
-                best_match_score = similarity
+            if score > best_match_score and score > threshold:
+                best_match_score = score
                 best_match_id = student_id
                 best_match_name = name
         
-        if best_match_id is not None:
-            log_message(f"Recognized student: {best_match_name} (ID: {best_match_id}) with confidence: {best_match_score:.2f}")
+        if best_match_id:
+            log_message(f"Best match: {best_match_name} (ID: {best_match_id}) with score {best_match_score:.2f}")
             return best_match_id, best_match_name
         else:
-            log_message(f"No matching student found above threshold ({threshold})")
+            log_message(f"No match found above threshold {threshold}")
             return None, None
             
     except Exception as e:
@@ -265,40 +279,60 @@ def process_frame(frame_path):
 
 def recognize_face(face_img, conn):
     """
-    Simple face recognition based on histogram comparison.
-    
-    In a real implementation, you would use a more sophisticated 
-    face recognition algorithm like face_recognition library or a deep learning model.
+    Face recognition based on histogram comparison.
     """
     try:
+        # Get a list of all students
         cursor = conn.cursor()
-        cursor.execute("SELECT student_id, name FROM student")
+        cursor.execute("SELECT student_id, name, photo_path FROM student WHERE photo_path IS NOT NULL")
         students = cursor.fetchall()
+        
+        if not students:
+            log_message("No students with photos found in database")
+            return None
         
         best_match = None
         best_score = 0
+        threshold = 0.5  # Minimum similarity threshold
+        
+        # Get base directory
+        BASE_DIR = os.path.dirname(os.path.abspath(__file__))
         
         # Resize for consistency
         face_img_resized = cv2.resize(face_img, (100, 100))
         face_hist = cv2.calcHist([face_img_resized], [0], None, [256], [0, 256])
         cv2.normalize(face_hist, face_hist, 0, 1, cv2.NORM_MINMAX)
         
-        for student_id, name in students:
-            # Check if student has a face image
-            student_face_path = f'student_faces/{student_id}/face.jpg'
-            if os.path.exists(student_face_path):
-                student_face = cv2.imread(student_face_path, cv2.IMREAD_GRAYSCALE)
-                if student_face is not None:
-                    student_face_resized = cv2.resize(student_face, (100, 100))
-                    student_hist = cv2.calcHist([student_face_resized], [0], None, [256], [0, 256])
-                    cv2.normalize(student_hist, student_hist, 0, 1, cv2.NORM_MINMAX)
-                    
-                    # Compare histograms
-                    score = cv2.compareHist(face_hist, student_hist, cv2.HISTCMP_CORREL)
-                    
-                    if score > best_score and score > 0.5:  # Threshold of 0.5 for similarity
-                        best_score = score
-                        best_match = (student_id, name, score)
+        for student_id, name, photo_path in students:
+            # Resolve the relative path to absolute path
+            if os.path.isabs(photo_path):
+                abs_photo_path = photo_path
+            else:
+                abs_photo_path = os.path.join(BASE_DIR, photo_path)
+            
+            # Check if the file exists
+            if not os.path.exists(abs_photo_path):
+                log_message(f"Warning: Photo file not found for student {student_id}: {abs_photo_path}")
+                continue
+                
+            # Load the student's reference face
+            ref_face = cv2.imread(abs_photo_path, cv2.IMREAD_GRAYSCALE)
+            if ref_face is None:
+                log_message(f"Warning: Could not read photo file for student {student_id}: {abs_photo_path}")
+                continue
+            
+            # Resize for consistency
+            ref_face_resized = cv2.resize(ref_face, (100, 100))
+            ref_hist = cv2.calcHist([ref_face_resized], [0], None, [256], [0, 256])
+            cv2.normalize(ref_hist, ref_hist, 0, 1, cv2.NORM_MINMAX)
+            
+            # Compare histograms
+            score = cv2.compareHist(face_hist, ref_hist, cv2.HISTCMP_CORREL)
+            log_message(f"Match score for {name}: {score:.2f}")
+            
+            if score > best_score and score > threshold:
+                best_score = score
+                best_match = (student_id, name, score)
         
         return best_match
     except Exception as e:
