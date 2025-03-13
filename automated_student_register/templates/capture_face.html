@@ -10,7 +10,10 @@
                 <h5>Camera Preview</h5>
             </div>
             <div class="card-body text-center">
-                <video id="video" width="640" height="480" autoplay class="border"></video>
+                <div id="video-container">
+                    <img id="video-feed" src="{{ url_for('video_feed') }}" alt="Camera Feed" width="640" height="480" class="border">
+                    <canvas id="canvas" width="640" height="480" style="display: none;"></canvas>
+                </div>
                 <div class="mt-3">
                     <button id="captureBtn" class="btn btn-primary">
                         <i class="fas fa-camera"></i> Capture Photo
@@ -26,7 +29,7 @@
                 <h5>Preview</h5>
             </div>
             <div class="card-body text-center">
-                <canvas id="canvas" width="320" height="240" class="border"></canvas>
+                <img id="preview" width="320" height="240" class="border">
                 <div class="mt-3">
                     <button id="saveBtn" class="btn btn-success">
                         <i class="fas fa-save"></i> Save
@@ -40,49 +43,44 @@
     </div>
 </div>
 
+<div id="statusMessage" class="alert mt-3" style="display: none;"></div>
+
 <script>
 document.addEventListener('DOMContentLoaded', function() {
-    const video = document.getElementById('video');
+    const videoFeed = document.getElementById('video-feed');
     const canvas = document.getElementById('canvas');
+    const preview = document.getElementById('preview');
     const captureBtn = document.getElementById('captureBtn');
     const saveBtn = document.getElementById('saveBtn');
     const retakeBtn = document.getElementById('retakeBtn');
     const previewContainer = document.getElementById('previewContainer');
+    const statusMessage = document.getElementById('statusMessage');
     
-    // Start webcam
-    async function startWebcam() {
-        try {
-            const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-            video.srcObject = stream;
-        } catch (err) {
-            console.error('Error accessing webcam:', err);
-            alert('Could not access webcam. Please ensure permissions are granted.');
-        }
+    function showStatus(message, isError = false) {
+        statusMessage.textContent = message;
+        statusMessage.className = isError ? 'alert alert-danger' : 'alert alert-success';
+        statusMessage.style.display = 'block';
+        setTimeout(() => { statusMessage.style.display = 'none'; }, 5000);
     }
     
-    // Start webcam when page loads
-    startWebcam();
-    
-    // Capture photo
     captureBtn.addEventListener('click', function() {
         const context = canvas.getContext('2d');
-        // Draw video frame onto canvas (scaled)
-        context.drawImage(video, 0, 0, canvas.width, canvas.height);
-        // Show preview
+        context.drawImage(videoFeed, 0, 0, canvas.width, canvas.height);
+        preview.src = canvas.toDataURL('image/jpeg');
         previewContainer.classList.remove('d-none');
     });
     
-    // Retake photo
     retakeBtn.addEventListener('click', function() {
         previewContainer.classList.add('d-none');
     });
     
-    // Save photo
     saveBtn.addEventListener('click', function() {
         canvas.toBlob(function(blob) {
             const formData = new FormData();
             formData.append('image', blob, 'face.jpg');
             formData.append('student_id', '{{ student.student_id }}');
+            
+            showStatus('Saving image...');
             
             fetch('/save_face', {
                 method: 'POST',
@@ -91,15 +89,15 @@ document.addEventListener('DOMContentLoaded', function() {
             .then(response => response.json())
             .then(data => {
                 if (data.success) {
-                    alert('Face saved successfully!');
-                    window.location.href = '/students';
+                    showStatus('Face saved successfully!');
+                    setTimeout(() => { window.location.href = '/students'; }, 1500);
                 } else {
                     throw new Error(data.error || 'Failed to save face');
                 }
             })
             .catch(error => {
                 console.error('Error saving face:', error);
-                alert('Error: ' + error.message);
+                showStatus('Error: ' + error.message, true);
             });
         }, 'image/jpeg', 0.95);
     });
