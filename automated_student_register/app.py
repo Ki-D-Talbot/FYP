@@ -48,6 +48,9 @@ class Attendance(db.Model):
 # Ensure directory for student faces exists
 os.makedirs('student_faces', exist_ok=True)
 
+# Add this near the top of your app where other directories are created
+os.makedirs('static/current', exist_ok=True)
+
 # Use app.app_context() to create tables
 with app.app_context():
     db.create_all()  # Create tables
@@ -314,58 +317,137 @@ def camera_service_status():
 @app.route('/video_feed')
 def video_feed():
     def generate_frames():
+        last_frame_time = 0
+        no_frame_count = 0
+        
         while True:
             try:
-                # Check if the current frame exists
+                current_time = time.time()
+                # Only process every 100ms to reduce CPU usage
+                if current_time - last_frame_time < 0.1:
+                    time.sleep(0.05)
+                    continue
+                    
+                last_frame_time = current_time
                 current_frame_path = 'static/current/frame.jpg'
                 
                 if os.path.exists(current_frame_path):
                     # Get modification time
                     mod_time = os.path.getmtime(current_frame_path)
-                    current_time = time.time()
                     
-                    # Only use frame if it's recent (less than 10 seconds old)
-                    if current_time - mod_time < 10:
+                    # Only use frame if it's recent (less than 5 seconds old)
+                    if current_time - mod_time < 5:
                         # Read the current frame saved by the camera service
                         frame = cv2.imread(current_frame_path)
+                        no_frame_count = 0  # Reset counter
                         
                         if frame is not None:
-                            # Convert frame to JPEG
-                            ret, buffer = cv2.imencode('.jpg', frame)
+                            # Resize to reduce bandwidth if frame is large
+                            if frame.shape[0] > 480 or frame.shape[1] > 640:
+                                frame = cv2.resize(frame, (640, 480))
+                                
+                            # Convert frame to JPEG with lower quality for better performance
+                            encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 70]
+                            ret, buffer = cv2.imencode('.jpg', frame, encode_param)
                             frame_bytes = buffer.tobytes()
                             
-                            # Yield the frame
                             yield (b'--frame\r\n'
-                                   b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+                                b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+                            continue
+                
+                # If we get here, either the file doesn't exist or frame is too old
+                no_frame_count += 1
+                
+                # Only create a new blank frame every 10 iterations to reduce CPU usage
+                if no_frame_count % 10 == 1:
+                    frame = np.zeros((240, 320, 3), dtype=np.uint8)  # Smaller frame for performance
+                    
+                    if os.path.exists(current_frame_path):
+                        cv2.putText(frame, "Camera feed not updating", (20, 120), 
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
                     else:
-                        # Frame is too old, create a blank frame with message
-                        frame = np.zeros((480, 640, 3), dtype=np.uint8)
-                        cv2.putText(frame, "Camera feed not updating", (50, 240), 
-                                    cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
-                        
-                        ret, buffer = cv2.imencode('.jpg', frame)
-                        frame_bytes = buffer.tobytes()
-                        
-                        yield (b'--frame\r\n'
-                               b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-                else:
-                    # No frame file, create a blank frame with message
-                    frame = np.zeros((480, 640, 3), dtype=np.uint8)
-                    cv2.putText(frame, "Camera not running", (50, 240), 
-                                cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+                        cv2.putText(frame, "Camera not running", (20, 120), 
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
                     
                     ret, buffer = cv2.imencode('.jpg', frame)
                     frame_bytes = buffer.tobytes()
                     
                     yield (b'--frame\r\n'
-                           b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+                        b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
                     
-                # Sleep to avoid excessive CPU usage
-                time.sleep(0.1)
+                time.sleep(0.1)  # Reduced sleep time
                 
             except Exception as e:
                 print(f"Error in generate_frames: {e}")
-                time.sleep(1)
+                time.sleep(0.5)
+    
+    return Response(generate_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
+
+@app.route('/capture_feed')
+def capture_feed():
+    """A lighter version of the video feed for capture face page"""
+    def generate_frames():
+        try:
+            # First try with PiCamera2 for Raspberry Pi
+            try:
+                from picamera2 import Picamera2
+                
+                picam2 = Picamera2()
+                config = picam2.create_preview_configuration(main={"size": (640, 480)})
+                picam2.configure(config)
+                picam2.start()
+                
+                try:
+                    while True:
+                        frame = picam2.capture_array()
+                        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                        
+                        # Use lower quality encoding for performance
+                        encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 70]
+                        ret, buffer = cv2.imencode('.jpg', frame, encode_param)
+                        frame_bytes = buffer.tobytes()
+                        
+                        yield (b'--frame\r\n'
+                               b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+                        time.sleep(0.1)  # Reduce framerate for better performance
+                finally:
+                    picam2.stop()
+            
+            # If PiCamera fails, try OpenCV with standard webcam
+            except (ImportError, Exception) as e:
+                print(f"PiCamera error: {e}, falling back to OpenCV")
+                cap = cv2.VideoCapture(0)
+                cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+                
+                try:
+                    while True:
+                        success, frame = cap.read()
+                        if not success:
+                            break
+                            
+                        # Use lower quality encoding for performance
+                        encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 70]
+                        ret, buffer = cv2.imencode('.jpg', frame, encode_param)
+                        frame_bytes = buffer.tobytes()
+                        
+                        yield (b'--frame\r\n'
+                               b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+                        time.sleep(0.1)  # Reduce framerate for better performance
+                finally:
+                    cap.release()
+                    
+        except Exception as e:
+            print(f"Error in capture_feed: {e}")
+            # Return a blank frame with error message
+            frame = np.zeros((240, 320, 3), dtype=np.uint8)
+            cv2.putText(frame, f"Camera error: {str(e)[:20]}", (10, 120), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+            ret, buffer = cv2.imencode('.jpg', frame)
+            frame_bytes = buffer.tobytes()
+            
+            yield (b'--frame\r\n'
+                   b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
     
     return Response(generate_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
@@ -491,6 +573,54 @@ def today_attendance():
             'status': 'error',
             'message': str(e)
         })
+
+@app.route('/debug_camera')
+@login_required
+def debug_camera():
+    """Debugging endpoint for camera configuration"""
+    # Check for camera service
+    service_running = False
+    with camera_lock:
+        if camera_service_process and camera_service_process.poll() is None:
+            service_running = True
+    
+    # Check for camera static directory
+    static_dir_exists = os.path.exists('static/current')
+    frame_exists = os.path.exists('static/current/frame.jpg')
+    
+    # Check if picamera2 is available
+    picamera_available = False
+    try:
+        from picamera2 import Picamera2
+        picamera_available = True
+    except ImportError:
+        pass
+    
+    # Get available video devices
+    video_devices = []
+    if os.path.exists('/dev'):
+        for device in os.listdir('/dev'):
+            if device.startswith('video'):
+                video_devices.append(f"/dev/{device}")
+    
+    debug_info = {
+        'camera_service_running': service_running,
+        'static_directory_exists': static_dir_exists,
+        'frame_file_exists': frame_exists,
+        'picamera_available': picamera_available,
+        'video_devices': video_devices,
+        'python_executable': sys.executable,
+        'working_directory': os.getcwd(),
+        'app_directory': os.path.dirname(os.path.abspath(__file__))
+    }
+    
+    # Check if frame is recent
+    if frame_exists:
+        mod_time = os.path.getmtime('static/current/frame.jpg')
+        current_time = time.time()
+        debug_info['frame_age_seconds'] = current_time - mod_time
+    
+    return jsonify(debug_info)
 
 if __name__ == '__main__':
     app.run(debug=True)
