@@ -152,14 +152,36 @@ def capture_face(student_id):
 @app.route('/save_face', methods=['POST'])
 @login_required
 def save_face():
-    if 'image' not in request.files:
-        return jsonify({"error": "No image provided"}), 400
-    
-    image = request.files['image']
     student_id = request.form.get('student_id')
     
     if not student_id:
         return jsonify({"error": "No student ID provided"}), 400
+    
+    # Check if we have an uploaded image or need to get the current frame
+    if 'image' in request.files and request.files['image'].filename:
+        # Case 1: Using uploaded image from canvas capture
+        image = request.files['image']
+        image_data = image.read()
+        img_array = np.frombuffer(image_data, np.uint8)
+        img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+    else:
+        # Case 2: No uploaded image, capture from camera service feed
+        print("No uploaded image, using current frame from camera service")
+        current_frame_path = 'static/current/frame.jpg'
+        
+        if not os.path.exists(current_frame_path):
+            return jsonify({"error": "Camera service not running. No current frame available."}), 400
+            
+        # Check if frame is recent
+        current_time = time.time()
+        mod_time = os.path.getmtime(current_frame_path)
+        if current_time - mod_time > 3:
+            return jsonify({"error": "Camera feed appears frozen. Please restart camera service."}), 400
+            
+        # Read the current frame
+        img = cv2.imread(current_frame_path)
+        if img is None:
+            return jsonify({"error": "Failed to read current camera frame"}), 500
     
     # Use absolute paths for internal processing
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -167,14 +189,11 @@ def save_face():
     os.makedirs(student_folder, exist_ok=True)
     
     image_path = os.path.join(student_folder, 'face.jpg')
+    
     try:
-        # Save the raw image
-        image.save(image_path)
-        
         # Process with face detection
-        img = cv2.imread(image_path)
         if img is None:
-            return jsonify({"error": "Could not read saved image"}), 500
+            return jsonify({"error": "Could not read image data"}), 500
             
         # Convert to grayscale for face detection
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
@@ -200,7 +219,7 @@ def save_face():
         faces = face_cascade.detectMultiScale(
             gray, 
             scaleFactor=1.1, 
-            minNeighbors=3,  # Lower value to be more permissive
+            minNeighbors=3,
             minSize=(30, 30)
         )
         
@@ -214,7 +233,7 @@ def save_face():
             )
             
         if len(faces) == 0:
-            return jsonify({"error": "No face detected in the captured image. Please try again with better lighting."}), 400
+            return jsonify({"error": "No face detected in the image. Please try again with better lighting."}), 400
             
         # If we found faces, crop to the largest one for better recognition later
         if len(faces) > 0:
@@ -232,9 +251,12 @@ def save_face():
             # Crop and save
             face_img = img[y:y+h, x:x+w]
             cv2.imwrite(image_path, face_img)
+        else:
+            # Just save the full image if no face is found (although this branch shouldn't be reached)
+            cv2.imwrite(image_path, img)
         
         # Store the path in the database - used relative URL path for browser access
-        rel_path = os.path.join('static', 'student_faces', student_id, 'face.jpg')
+        rel_path = f'static/student_faces/{student_id}/face.jpg'
         
         student = db.session.get(Student, student_id)
         if student:
@@ -456,61 +478,84 @@ def video_feed():
 
 @app.route('/capture_feed')
 def capture_feed():
-    """A lighter version of the video feed for capture face page"""
+    """Show camera feed from the running camera service for face capture page"""
     def generate_frames():
-        print("Starting capture feed...")
-        try:
-            # First try with OpenCV
-            cap = cv2.VideoCapture(0)
-            if not cap.isOpened():
-                raise Exception("Could not open webcam with OpenCV")
-                
-            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Reduce buffer size for less latency
-            
-            # Warm up camera
-            for _ in range(5):
-                cap.read()
-                
-            print("Camera initialized successfully")
-            
+        print("Starting capture feed from camera service frames...")
+        last_frame_time = 0
+        no_frame_count = 0
+        
+        while True:
             try:
-                while True:
-                    success, frame = cap.read()
-                    if not success:
-                        print("Failed to read frame")
-                        time.sleep(0.1)
-                        continue
+                current_time = time.time()
+                # Only process every 100ms to reduce CPU usage
+                if current_time - last_frame_time < 0.1:
+                    time.sleep(0.05)
+                    continue
+                    
+                last_frame_time = current_time
+                current_frame_path = 'static/current/frame.jpg'
+                
+                if os.path.exists(current_frame_path):
+                    # Get modification time
+                    mod_time = os.path.getmtime(current_frame_path)
+                    
+                    # Only use frame if it's recent (less than 3 seconds old)
+                    if current_time - mod_time < 3:
+                        # Read the current frame saved by the camera service
+                        frame = cv2.imread(current_frame_path)
                         
-                    # Use lower quality encoding for performance
-                    encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 80]
-                    ret, buffer = cv2.imencode('.jpg', frame, encode_param)
-                    if not ret:
-                        continue
-                        
+                        if frame is not None:
+                            # Add a "Capture Mode" overlay to indicate we're in capture mode
+                            cv2.putText(frame, "CAPTURE MODE", (20, 30), 
+                                        cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 0), 2)
+                            
+                            # Use lower quality encoding for performance
+                            encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 80]
+                            ret, buffer = cv2.imencode('.jpg', frame, encode_param)
+                            if not ret:
+                                continue
+                                
+                            frame_bytes = buffer.tobytes()
+                            no_frame_count = 0  # Reset counter
+                            
+                            yield (b'--frame\r\n'
+                                  b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+                            continue
+                
+                # If we get here, either the file doesn't exist or frame is too old
+                no_frame_count += 1
+                
+                # Only create a new blank frame every 5 iterations to reduce CPU usage
+                if no_frame_count % 5 == 1:
+                    # Create a message frame
+                    frame = np.zeros((480, 640, 3), dtype=np.uint8)
+                    
+                    # Check if camera service is running
+                    with camera_lock:
+                        service_running = camera_service_process and camera_service_process.poll() is None
+                    
+                    if service_running:
+                        cv2.putText(frame, "Waiting for camera service...", (80, 240), 
+                                   cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 2)
+                        cv2.putText(frame, "Start camera service from the admin page", (60, 280), 
+                                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 1)
+                    else:
+                        cv2.putText(frame, "Camera service not running", (80, 240), 
+                                   cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 2)
+                        cv2.putText(frame, "Start camera service from the admin page", (60, 280), 
+                                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 1)
+                    
+                    ret, buffer = cv2.imencode('.jpg', frame)
                     frame_bytes = buffer.tobytes()
                     
                     yield (b'--frame\r\n'
-                           b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-                    time.sleep(0.05)  # Slightly faster framerate
-            finally:
-                print("Releasing camera")
-                cap.release()
+                          b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
                 
-        except Exception as e:
-            print(f"Error in capture_feed: {e}")
-            # Return a blank frame with error message
-            frame = np.zeros((480, 640, 3), dtype=np.uint8)  # Larger frame for better visibility
-            cv2.putText(frame, f"Camera error:", (10, 240), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 2)
-            cv2.putText(frame, f"{str(e)[:40]}", (10, 280), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 1)
-            ret, buffer = cv2.imencode('.jpg', frame)
-            frame_bytes = buffer.tobytes()
-            
-            yield (b'--frame\r\n'
-                  b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+                time.sleep(0.1)  # Small sleep to prevent high CPU usage
+                
+            except Exception as e:
+                print(f"Error in capture_feed: {e}")
+                time.sleep(0.5)  # Longer sleep on error
     
     return Response(generate_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
 

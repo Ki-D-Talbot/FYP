@@ -38,6 +38,14 @@
         padding: 20px;
         border-radius: 5px;
     }
+
+    .control-buttons {
+        margin-top: 15px;
+    }
+
+    .control-buttons button {
+        margin: 0 5px;
+    }
 </style>
 {% endblock %}
 
@@ -48,21 +56,28 @@
     <div class="col-md-8">
         <div class="card">
             <div class="card-header">
-                <h5>Camera Preview</h5>
+                <div class="d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">Camera Preview</h5>
+                    <div>
+                        <span class="badge bg-primary" id="camera-mode">Using running camera service</span>
+                    </div>
+                </div>
             </div>
             <div class="card-body text-center">
                 <div id="video-container">
                     <div id="loading" class="loading-indicator">
-                        <i class="fas fa-spinner fa-spin"></i> Starting camera...
+                        <i class="fas fa-spinner fa-spin"></i> Loading camera...
                     </div>
                     <img id="video-feed" src="{{ url_for('capture_feed') }}" alt="Camera Feed" class="border"
                         onerror="handleCameraError()" onload="cameraLoaded()">
                     <canvas id="canvas" width="640" height="480" style="display: none;"></canvas>
-                    <div class="camera-status" id="camera-status"></div>
                 </div>
-                <div class="mt-3">
-                    <button id="captureBtn" class="btn btn-primary" disabled>
+                <div class="control-buttons">
+                    <button id="captureBtn" class="btn btn-primary">
                         <i class="fas fa-camera"></i> Capture Photo
+                    </button>
+                    <button id="startCameraBtn" class="btn btn-secondary">
+                        <i class="fas fa-play"></i> Start Camera Service
                     </button>
                 </div>
             </div>
@@ -102,7 +117,7 @@
         const previewContainer = document.getElementById('previewContainer');
         const statusMessage = document.getElementById('statusMessage');
         const loadingIndicator = document.getElementById('loading');
-        const cameraStatus = document.getElementById('camera-status');
+        const startCameraBtn = document.getElementById('startCameraBtn');
 
         let cameraReady = false;
         let cameraErrorCount = 0;
@@ -118,20 +133,14 @@
         function cameraLoaded() {
             loadingIndicator.style.display = 'none';
             cameraReady = true;
-            captureBtn.disabled = false;
-            cameraStatus.textContent = '● Live';
-            cameraStatus.style.backgroundColor = 'rgba(40,167,69,0.7)';
             cameraErrorCount = 0;
         }
 
         function handleCameraError() {
             cameraErrorCount++;
-            if (cameraErrorCount > 3) {
+            if (cameraErrorCount > 2) {
                 loadingIndicator.innerHTML = '<i class="fas fa-exclamation-triangle"></i> Camera not available';
-                captureBtn.disabled = true;
-                cameraStatus.textContent = '✕ Error';
-                cameraStatus.style.backgroundColor = 'rgba(220,53,69,0.7)';
-                showStatus('Camera not available. Please check your camera connection and permissions.', true);
+                showStatus('Camera not working. Try starting the camera service.', true);
             }
         }
 
@@ -146,6 +155,22 @@
             if (!cameraReady) {
                 refreshVideoFeed();
             }
+
+            // Check camera service status
+            fetch('/camera_service_status')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'running') {
+                        startCameraBtn.classList.remove('btn-danger');
+                        startCameraBtn.classList.add('btn-success');
+                        startCameraBtn.innerHTML = '<i class="fas fa-check-circle"></i> Camera Service Running';
+                    } else {
+                        startCameraBtn.classList.remove('btn-success');
+                        startCameraBtn.classList.add('btn-danger');
+                        startCameraBtn.innerHTML = '<i class="fas fa-exclamation-triangle"></i> Start Camera Service';
+                    }
+                });
+
         }, 3000);
 
         // Initial feed load
@@ -189,6 +214,25 @@
                         showStatus('Error: ' + error.message, true);
                     });
             }, 'image/jpeg', 0.95);
+        });
+
+        startCameraBtn.addEventListener('click', function () {
+            showStatus('Starting camera service...');
+
+            fetch('/start_camera_service')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success' || data.status === 'already_running') {
+                        showStatus('Camera service started successfully');
+                        setTimeout(refreshVideoFeed, 1000);
+                    } else {
+                        throw new Error(data.message || 'Failed to start camera service');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error starting camera service:', error);
+                    showStatus('Error: ' + error.message, true);
+                });
         });
 
         // Clean up interval when leaving page
