@@ -458,29 +458,33 @@ def video_feed():
 def capture_feed():
     """A lighter version of the video feed for capture face page"""
     def generate_frames():
-        # Don't try PiCamera if camera service is already running
-        camera_in_use = False
-        with camera_lock:
-            if camera_service_process and camera_service_process.poll() is None:
-                camera_in_use = True
-                
+        print("Starting capture feed...")
         try:
-            # First try with OpenCV which is more reliable for this purpose
+            # First try with OpenCV
             cap = cv2.VideoCapture(0)
             if not cap.isOpened():
-                raise Exception("Could not open webcam")
+                raise Exception("Could not open webcam with OpenCV")
                 
             cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
             cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Reduce buffer size for less latency
+            
+            # Warm up camera
+            for _ in range(5):
+                cap.read()
+                
+            print("Camera initialized successfully")
             
             try:
                 while True:
                     success, frame = cap.read()
                     if not success:
-                        break
+                        print("Failed to read frame")
+                        time.sleep(0.1)
+                        continue
                         
                     # Use lower quality encoding for performance
-                    encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 70]
+                    encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 80]
                     ret, buffer = cv2.imencode('.jpg', frame, encode_param)
                     if not ret:
                         continue
@@ -489,21 +493,24 @@ def capture_feed():
                     
                     yield (b'--frame\r\n'
                            b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-                    time.sleep(0.1)  # Reduce framerate for better performance
+                    time.sleep(0.05)  # Slightly faster framerate
             finally:
+                print("Releasing camera")
                 cap.release()
                 
         except Exception as e:
             print(f"Error in capture_feed: {e}")
             # Return a blank frame with error message
-            frame = np.zeros((240, 320, 3), dtype=np.uint8)
-            cv2.putText(frame, f"Camera error: {str(e)[:20]}", (10, 120), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+            frame = np.zeros((480, 640, 3), dtype=np.uint8)  # Larger frame for better visibility
+            cv2.putText(frame, f"Camera error:", (10, 240), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 2)
+            cv2.putText(frame, f"{str(e)[:40]}", (10, 280), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 1)
             ret, buffer = cv2.imencode('.jpg', frame)
             frame_bytes = buffer.tobytes()
             
             yield (b'--frame\r\n'
-                   b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+                  b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
     
     return Response(generate_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
@@ -702,6 +709,48 @@ def serve_student_face(student_id):
     except Exception as e:
         print(f"Error serving student face: {e}")
         return str(e), 500
+
+@app.route('/test_webcam')
+def test_webcam():
+    """Test webcam availability"""
+    try:
+        devices = []
+        # Check available video devices
+        if os.path.exists('/dev'):
+            for device in os.listdir('/dev'):
+                if device.startswith('video'):
+                    device_path = f"/dev/{device}"
+                    # Try to open the device
+                    cap = cv2.VideoCapture(device_path)
+                    readable = cap.isOpened()
+                    cap.release()
+                    
+                    devices.append({
+                        'path': device_path,
+                        'readable': readable
+                    })
+        
+        # Test default camera
+        cap = cv2.VideoCapture(0)
+        default_camera_works = cap.isOpened()
+        if default_camera_works:
+            ret, frame = cap.read()
+            has_frame = ret and frame is not None
+        else:
+            has_frame = False
+        cap.release()
+        
+        return jsonify({
+            'status': 'success',
+            'devices': devices,
+            'default_camera_works': default_camera_works,
+            'can_read_frame': has_frame
+        })
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        })
 
 if __name__ == '__main__':
     app.run(debug=True)
