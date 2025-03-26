@@ -80,69 +80,69 @@ def recognize_student(face_img, conn):
     Recognize a student face by comparing with stored faces
     """
     try:
-        # Convert to proper size for recognition
-        face_img_resized = cv2.resize(face_img, (100, 100))
+        # Add debug logging
+        log_message(f"Starting face recognition on image of shape {face_img.shape}")
         
-        # Get all student IDs and their photo paths from the database
-        cursor = conn.cursor()
-        cursor.execute("SELECT student_id, name, photo_path FROM student WHERE photo_path IS NOT NULL")
-        students = cursor.fetchall()
+        # Preprocess input face - resize to standard size
+        face_img_resized = cv2.resize(face_img, (128, 128))
         
-        if not students:
-            return None, None
+        # Make sure it's in RGB for consistency with stored faces
+        if len(face_img_resized.shape) == 3 and face_img_resized.shape[2] == 3:
+            # Convert to RGB if it's not already (from BGR)
+            if not already_rgb:  # You'd need to determine this based on your pipeline
+                face_img_resized = cv2.cvtColor(face_img_resized, cv2.COLOR_BGR2RGB)
         
         best_match_id = None
         best_match_name = None
         best_match_score = 0
-        threshold = 0.50  # Lower threshold for better matching
+        threshold = 0.4  # Lower threshold for better matching (was 0.5)
         
         # Get the base directory for consistent path resolution
         BASE_DIR = os.path.dirname(os.path.abspath(__file__))
         
-        # Calculate histogram for input face
-        face_hist = cv2.calcHist([face_img_resized], [0], None, [256], [0, 256])
+        # Calculate histogram for input face (in RGB)
+        face_hist = cv2.calcHist([face_img_resized], [0, 1, 2], None, [32, 32, 32], [0, 256, 0, 256, 0, 256])
         cv2.normalize(face_hist, face_hist, 0, 1, cv2.NORM_MINMAX)
+        
+        # Get all students from database
+        cursor = conn.cursor()
+        cursor.execute("SELECT student_id, name, photo_path FROM student WHERE photo_path IS NOT NULL")
+        students = cursor.fetchall()
+        log_message(f"Found {len(students)} students with photos to compare against")
         
         for student_id, name, photo_path in students:
             try:
-                # Resolve the relative path to absolute path
-                if os.path.isabs(photo_path):
-                    abs_photo_path = photo_path
-                else:
+                # Get absolute path
+                if not os.path.isabs(photo_path):
                     abs_photo_path = os.path.join(BASE_DIR, photo_path)
+                else:
+                    abs_photo_path = photo_path
                     
-                # Check if the file exists
+                # Skip if file doesn't exist
                 if not os.path.exists(abs_photo_path):
-                    # Try an alternative path
-                    alt_path = os.path.join(BASE_DIR, 'static', 'student_faces', student_id, 'face.jpg')
-                    if os.path.exists(alt_path):
-                        abs_photo_path = alt_path
-                    else:
-                        log_message(f"Warning: Photo file not found for student {student_id}: {abs_photo_path}")
-                        continue
+                    log_message(f"Photo for student {name} not found at {abs_photo_path}")
+                    continue
                     
-                # Load the student's reference face
+                # Load reference face
                 ref_face = cv2.imread(abs_photo_path)
                 if ref_face is None:
-                    log_message(f"Warning: Could not read photo file for student {student_id}: {abs_photo_path}")
+                    log_message(f"Failed to load image for student {name}")
                     continue
-                
-                # Convert to grayscale if needed
-                if len(ref_face.shape) == 3:
-                    ref_face_gray = cv2.cvtColor(ref_face, cv2.COLOR_BGR2GRAY)
-                else:
-                    ref_face_gray = ref_face
                     
-                # Resize for consistency
-                ref_face_resized = cv2.resize(ref_face_gray, (100, 100))
+                # Convert to RGB since that's what we're using for processing
+                ref_face = cv2.cvtColor(ref_face, cv2.COLOR_BGR2RGB)
+                
+                # Resize reference face to same size
+                ref_face_resized = cv2.resize(ref_face, (128, 128))
                 
                 # Calculate histogram for reference face
-                ref_hist = cv2.calcHist([ref_face_resized], [0], None, [256], [0, 256])
+                ref_hist = cv2.calcHist([ref_face_resized], [0, 1, 2], None, [32, 32, 32], [0, 256, 0, 256, 0, 256])
                 cv2.normalize(ref_hist, ref_hist, 0, 1, cv2.NORM_MINMAX)
                 
                 # Compare histograms
                 score = cv2.compareHist(face_hist, ref_hist, cv2.HISTCMP_CORREL)
                 
+                # Always log match scores for debugging
                 log_message(f"Match score for student {name}: {score:.2f}")
                 
                 if score > best_match_score and score > threshold:
@@ -408,8 +408,7 @@ def main():
                 frame = picam2.capture_array()
                 
                 # Convert to BGR (OpenCV format)
-                if len(frame.shape) == 3 and frame.shape[2] == 3:  # If RGB
-                    frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
                 
                 # Make a copy for processing
                 display_frame = frame.copy()

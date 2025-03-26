@@ -164,6 +164,8 @@ def save_face():
         image_data = image.read()
         img_array = np.frombuffer(image_data, np.uint8)
         img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+        # Convert BGR to RGB for processing
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     else:
         # Case 2: No uploaded image, capture from camera service feed
         print("No uploaded image, using current frame from camera service")
@@ -180,6 +182,8 @@ def save_face():
             
         # Read the current frame
         img = cv2.imread(current_frame_path)
+        # Convert BGR to RGB for processing
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         if img is None:
             return jsonify({"error": "Failed to read current camera frame"}), 500
     
@@ -248,12 +252,16 @@ def save_face():
             w = min(img.shape[1] - x, w + 2 * margin)
             h = min(img.shape[0] - y, h + 2 * margin)
             
-            # Crop and save
+            # Crop and save - img is already in RGB format from earlier conversion
             face_img = img[y:y+h, x:x+w]
-            cv2.imwrite(image_path, face_img)
+            # Convert RGB back to BGR for saving with cv2.imwrite
+            face_img_bgr = cv2.cvtColor(face_img, cv2.COLOR_RGB2BGR)
+            cv2.imwrite(image_path, face_img_bgr)
         else:
             # Just save the full image if no face is found (although this branch shouldn't be reached)
-            cv2.imwrite(image_path, img)
+            # Convert RGB back to BGR for saving with cv2.imwrite
+            img_bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+            cv2.imwrite(image_path, img_bgr)
         
         # Store the path in the database - used relative URL path for browser access
         rel_path = f'static/student_faces/{student_id}/face.jpg'
@@ -435,6 +443,9 @@ def video_feed():
                         no_frame_count = 0  # Reset counter
                         
                         if frame is not None:
+                            # Convert BGR to RGB for correct color display
+                            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                            
                             # Resize to reduce bandwidth if frame is large
                             if frame.shape[0] > 480 or frame.shape[1] > 640:
                                 frame = cv2.resize(frame, (640, 480))
@@ -505,6 +516,9 @@ def capture_feed():
                         frame = cv2.imread(current_frame_path)
                         
                         if frame is not None:
+                            # Convert BGR to RGB for correct color display
+                            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                            
                             # Add a "Capture Mode" overlay to indicate we're in capture mode
                             cv2.putText(frame, "CAPTURE MODE", (20, 30), 
                                         cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 0), 2)
