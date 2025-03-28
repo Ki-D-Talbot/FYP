@@ -58,11 +58,27 @@ with app.app_context():
 # Load facial recognition model
 def load_model():
     try:
-        model_path = 'facial_recognition_model.tflite'  
-        interpreter = tflite.Interpreter(model_path=model_path)
-        interpreter.allocate_tensors()
-        print("Model loaded successfully")
-        return interpreter
+        # Try multiple possible model paths
+        possible_paths = [
+            'facial_recognition_model.tflite',  # Original path
+            'automated_student_register/models/facial_recognition_model.tflite',  # New path from error
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), 'models/facial_recognition_model.tflite'),  # Absolute path
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), 'facial_recognition_model.tflite')  # Absolute path in current dir
+        ]
+        
+        # Try each path
+        for model_path in possible_paths:
+            if os.path.exists(model_path):
+                print(f"Found model at: {model_path}")
+                interpreter = tflite.Interpreter(model_path=model_path)
+                interpreter.allocate_tensors()
+                print("Model loaded successfully")
+                return interpreter
+                
+        # If we get here, no model was found
+        print(f"Error: Model not found in any of these locations: {possible_paths}")
+        return None
+        
     except Exception as e:
         print(f"Error loading model: {e}")
         return None
